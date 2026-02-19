@@ -167,11 +167,12 @@ export default async function AgentDetailsPage({ params }: DetailsPageParams) {
     console.warn('[AgentDetailsPage] Failed to resolve owner address:', error);
   }
 
+  const uaid = `uaid:did:8004:${chainId}:${numericAgentId}`;
+
   const [feedbackItems, feedbackSummary, validations] = await Promise.all([
     client
       .getAgentFeedback({
-        agentId: numericAgentId,
-        chainId,
+        uaid,
         includeRevoked: true,
         limit: 200,
       })

@@ -9,7 +9,7 @@ import { useStandardConnect } from "../../components/useStandardConnect";
 
 import {
   createAgentWithWallet,
-  getCounterfactualAAAddressByAgentName
+  getCounterfactualSmartAccountAddressByAgentName
 } from "@agentic-trust/core/client";
 import { keccak256, stringToHex } from "viem";
 import { sepolia } from "viem/chains";
@@ -617,7 +617,7 @@ export default function OnboardingPage() {
       // Use custom agent name if provided, otherwise derive from domain
       const agentName = customAgentName || deriveAgentNameFromDomain(emailDomain, useFullDomain);
       // Compute the counterfactual AA address for the agent using the client helper.
-      const agentAccountAddress = await getCounterfactualAAAddressByAgentName(
+      const agentAccountAddress = await getCounterfactualSmartAccountAddressByAgentName(
         agentName,
         account as `0x${string}`,
         {

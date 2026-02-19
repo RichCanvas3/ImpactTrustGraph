@@ -3,9 +3,9 @@
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Container, Grid, Card, CardContent, CardMedia, Typography, TextField, Button, Chip, CircularProgress, Pagination, InputAdornment, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
-import { createPublicClient, http, type PublicClient, type Address } from 'viem';
+import { type Address } from 'viem';
 import { useRouter } from 'next/navigation';
-import { getSupportedChainIds, getChainDisplayMetadata, getChainRpcUrl, getDeployedAccountClientByAgentName } from '@agentic-trust/core';
+import { getChainDisplayMetadataSafe, getDeployedAccountClientByAgentName } from '@agentic-trust/core';
 import { buildDid8004, requestValidationWithWallet } from '@my-scope/core';
 import { sepolia, baseSepolia, optimismSepolia } from 'viem/chains';
 import { useWeb3Auth } from '../../components/Web3AuthProvider';
@@ -70,7 +70,8 @@ type DiscoverParams = {
 };
 
 const DEFAULT_FILTERS: Filters = {
-  chainId: 'all',
+  // Default this app to Sepolia unless the user picks otherwise.
+  chainId: String(sepolia.id),
   address: '',
   name: '',
   agentId: '',
@@ -140,13 +141,14 @@ export default function AgentsRoute() {
   const [feedbackComment, setFeedbackComment] = useState('');
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
-  const clientCache = useRef<Record<number, PublicClient>>({});
+  // Note: we intentionally avoid on-chain RPC calls from this page (CORS/rate limits).
 
-  const supportedChainIds = getSupportedChainIds();
+  const supportedChainIds = [sepolia.id];
   const chainOptions = useMemo(
     () =>
       supportedChainIds.map((chainId: number) => {
-        const metadata = getChainDisplayMetadata(chainId);
+        // UI-safe: does not require per-chain RPC env vars.
+        const metadata = getChainDisplayMetadataSafe(chainId);
         const label = metadata?.displayName || metadata?.chainName || `Chain ${chainId}`;
         return { id: chainId, label };
       }),
@@ -271,104 +273,9 @@ export default function AgentsRoute() {
   }, [hasLoaded, searchAgents, filters, currentPage]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function getClient(chainId: number): Promise<PublicClient> {
-      if (!clientCache.current[chainId]) {
-        const rpcUrl = getChainRpcUrl(chainId);
-        if (!rpcUrl) {
-          throw new Error(`Missing RPC URL for chain ${chainId}`);
-        }
-        clientCache.current[chainId] = createPublicClient({
-          transport: http(rpcUrl),
-        }) as any;
-      }
-      return clientCache.current[chainId];
-    }
-
-    async function computeOwnership() {
-      if (!isConnected || !walletAddress || agents.length === 0 || !web3auth?.provider) {
-        if (!cancelled) {
-          setOwnedMap({});
-        }
-        return;
-      }
-
-      const lowerWallet = walletAddress.toLowerCase();
-      const entries: Record<string, boolean> = {};
-
-      for (const agent of agents) {
-        const ownershipKey = `${agent.chainId}:${agent.agentId}`;
-        const account = typeof agent.agentAccount === 'string' ? agent.agentAccount : null;
-        if (!account || !account.startsWith('0x')) {
-          entries[ownershipKey] = false;
-          continue;
-        }
-
-        try {
-          const client = await getClient(agent.chainId);
-          const code = await client.getBytecode({ address: account as Address });
-
-          if (!code || code === '0x') {
-            entries[ownershipKey] = account.toLowerCase() === lowerWallet;
-            continue;
-          }
-
-          let controller: string | null = null;
-
-          try {
-            controller = (await (client as any).readContract({
-              address: account as Address,
-              abi: OWNER_ABI,
-              functionName: 'owner',
-            })) as `0x${string}`;
-          } catch {
-            // ignore
-          }
-
-          if (!controller) {
-            try {
-              controller = (await (client as any).readContract({
-                address: account as Address,
-                abi: GET_OWNER_ABI,
-                functionName: 'getOwner',
-              })) as `0x${string}`;
-            } catch {
-              // ignore
-            }
-          }
-
-          if (!controller) {
-            try {
-              const owners = (await (client as any).readContract({
-                address: account as Address,
-                abi: OWNERS_ABI,
-                functionName: 'owners',
-              })) as `0x${string}`[];
-              controller = owners?.[0] ?? null;
-            } catch {
-              // ignore
-            }
-          }
-
-          entries[ownershipKey] = Boolean(controller && controller.toLowerCase() === lowerWallet);
-        } catch (ownershipError) {
-          console.debug('Ownership detection failed', ownershipError);
-          entries[ownershipKey] = false;
-        }
-      }
-
-      if (!cancelled) {
-        setOwnedMap(entries);
-      }
-    }
-
-    computeOwnership();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [agents, web3auth?.provider, isConnected, walletAddress]);
+    // Don't do on-chain ownership checks for cards.
+    setOwnedMap({});
+  }, [agents]);
 
   const handleAgentClick = useCallback(
     (agent: Agent) => {
@@ -434,7 +341,7 @@ export default function AgentsRoute() {
 
   const handleClear = useCallback(() => {
     const defaultFilters: Filters = {
-      chainId: 'all',
+      chainId: String(sepolia.id),
       address: '',
       name: '',
       agentId: '',
@@ -464,7 +371,7 @@ export default function AgentsRoute() {
             Organization's
           </Typography>
           <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-            Discover and explore organizations in the Agentic Trust Network
+            Impact 
           </Typography>
 
           {/* Primary search parameters: chain, agent name, agent ID */}
@@ -480,7 +387,6 @@ export default function AgentsRoute() {
                   value={filters.chainId}
                   onChange={(e) => handleFilterChange('chainId', e.target.value)}
                 >
-                  <option value="all">All Chains</option>
                   {chainOptions.map((opt) => (
                     <option key={opt.id} value={opt.id}>
                       {opt.label}

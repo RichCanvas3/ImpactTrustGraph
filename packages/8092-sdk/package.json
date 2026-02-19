@@ -1,0 +1,13 @@
+{
+  "name": "@agentic-trust/8092-sdk",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "viem": "^2.0.0"
+  }
+}
+

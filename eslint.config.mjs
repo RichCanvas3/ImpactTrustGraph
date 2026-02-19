@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist", "node_modules", "**/next.config.js"],
+    ignores: ["dist", "node_modules", ".next", "**/.next/**", "**/next.config.js"],
   },
   js.configs.recommended,
   // Keep lint fast and non-type-aware across the monorepo.

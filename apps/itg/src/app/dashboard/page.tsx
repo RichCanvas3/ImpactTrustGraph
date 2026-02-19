@@ -454,9 +454,9 @@ export default function DashboardPage() {
       console.warn("[DashboardPage] No defaultOrgAgent found - showing error");
       if (isMounted) {
         setLoading(false);
-        //setError(
-        //  "Organization agent is not defined. Please complete the standard connection/onboarding flow to register or select an organization agent."
-        //);
+        setError(
+          "No default organization agent is set. Complete onboarding to register/select your organization agent."
+        );
       }
     }
 
@@ -469,7 +469,7 @@ export default function DashboardPage() {
         clearTimeout(timeoutId);
       }
     };
-  }, [web3auth, isWeb3AuthInitializing, defaultOrgAgent, isLoadingAgent, user]);
+  }, [web3auth, isWeb3AuthInitializing, defaultOrgAgent, isLoadingAgent, user?.email]);
 
   // Fetch database info when user email becomes available (e.g., after refresh)
   React.useEffect(() => {
@@ -851,7 +851,7 @@ export default function DashboardPage() {
 
   // Animate progress bar over 60 seconds when loading
   React.useEffect(() => {
-    if (loading || error || !agentInfo) {
+    if (loading) {
       setLoadingProgress(0);
       const startTime = Date.now();
       const duration = 60000; // 60 seconds
@@ -870,7 +870,7 @@ export default function DashboardPage() {
     } else {
       setLoadingProgress(0);
     }
-  }, [loading, error, agentInfo]);
+  }, [loading]);
 
   // Compute tab indices based on what's available - MUST be before early return
   const getTabIndex = React.useMemo(() => {
@@ -882,8 +882,8 @@ export default function DashboardPage() {
     };
   }, [organizationData]);
 
-  // Loading state - show for loading, error, or no agent info
-  if (loading || error || !agentInfo) {
+  // Loading state - only while actively loading
+  if (loading) {
     console.log("[DashboardPage] Rendering loading state", { loading, error, hasAgentInfo: !!agentInfo });
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -916,6 +916,19 @@ export default function DashboardPage() {
             Please wait while we load your agent information
           </Typography>
         </Box>
+      </Container>
+    );
+  }
+
+  if (error || !agentInfo) {
+    return (
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {error || "Missing agent context for dashboard."}
+        </Alert>
+        <Button variant="contained" onClick={() => router.push("/onboarding")}>
+          Go to onboarding
+        </Button>
       </Container>
     );
   }

@@ -12,9 +12,9 @@
     "lint": "eslint . --ext ts,tsx,js,jsx"
   },
   "dependencies": {
-    "@agentic-trust/8004-ext-sdk": "^1.0.33",
-    "@agentic-trust/8004-sdk": "^1.0.33",
-    "@agentic-trust/core": "^1.0.33",
+    "@agentic-trust/8004-ext-sdk": "1.0.42",
+    "@agentic-trust/8004-sdk": "1.0.42",
+    "@agentic-trust/core": "1.0.42",
     "@hono/node-server": "^1.19.6",
     "@my-scope/core": "workspace:*",
     "dotenv": "^16.4.5",

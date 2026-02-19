@@ -1,0 +1,11 @@
+{
+  "name": "@agentic-trust/8122-sdk",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {}
+}
+

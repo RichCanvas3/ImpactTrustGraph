@@ -19,6 +19,16 @@
     "eslint-plugin-react-refresh": "^0.4.0",
     "prettier": "^3.3.0",
     "vitest": "^2.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "@agentic-trust/core": "1.0.42",
+      "@agentic-trust/8004-sdk": "1.0.42",
+      "@agentic-trust/8004-ext-sdk": "1.0.42",
+      "@agentic-trust/veramo-agent-extension": "1.0.42",
+      "@agentic-trust/8092-sdk": "workspace:*",
+      "@agentic-trust/8122-sdk": "workspace:*"
+    }
   }
 }
 

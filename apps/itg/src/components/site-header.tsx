@@ -183,27 +183,7 @@ export function SiteHeader() {
         }}
       >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
-            <Box
-              sx={(theme) => ({
-                width: 32,
-                height: 32,
-                borderRadius: "50%",
-                border: "2px solid rgba(255,255,255,0.7)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              background:
-                  "radial-gradient(circle at 30% 20%, #e5e7eb, #9ca3af 60%, #4b5563)",
-              boxShadow:
-                  "0 4px 10px rgba(15,23,42,0.6), 0 0 0 1px rgba(15,23,42,0.8)",
-                fontSize: 14,
-                fontWeight: 700,
-                color: theme.palette.primary.main,
-                textAlign: "center"
-              })}
-            >
-              ATN
-            </Box>
+            
             <Box>
               <Typography
                 variant="h6"
@@ -214,13 +194,7 @@ export function SiteHeader() {
                   textTransform: "uppercase"
                 }}
               >
-              Agentic Trust Network
-              </Typography>
-              <Typography
-                variant="caption"
-                sx={{ opacity: 0.85, display: "block" }}
-              >
-                Official Organization Registry
+              Impact Trust Graph
               </Typography>
             </Box>
           </Box>
