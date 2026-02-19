@@ -1,0 +1,74 @@
+{
+  "name": "@my-scope/core",
+  "version": "0.0.1",
+  "private": false,
+  "description": "Core React components and hooks for the arr monorepo.",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.tsx --dts --format cjs,esm --clean",
+    "test": "vitest",
+    "lint": "eslint src --ext ts,tsx",
+    "format": "prettier \"src/**/*.{ts,tsx,md}\" --check",
+    "format:fix": "prettier \"src/**/*.{ts,tsx,md}\" --write"
+  },
+  "dependencies": {
+    "@agentic-trust/core": "^1.0.33",
+    "@agentic-trust/8004-ext-sdk": "^1.0.33",
+    "@agentic-trust/8004-sdk": "^1.0.33",
+    "@agentic-trust/veramo-agent-extension": "^1.0.33",
+    "@metamask/smart-accounts-kit": "^0.1.0",
+    "@emotion/cache": "^11.11.3",
+    "@emotion/react": "^11.11.3",
+    "@emotion/styled": "^11.11.3",
+    "@mui/icons-material": "^5.15.17",
+    "@mui/material": "^5.15.17",
+    "@veramo/core": "^6.0.0",
+    "@veramo/did-manager": "^6.0.0",
+    "@veramo/did-resolver": "^6.0.0",
+    "@veramo/key-manager": "^6.0.0",
+    "@web3auth/base": "^8.12.4",
+    "@web3auth/ethereum-provider": "^8.12.4",
+    "@web3auth/metamask-adapter": "^8.12.4",
+    "@web3auth/modal": "^8.12.4",
+    "@web3auth/openlogin-adapter": "^8.12.4",
+    "did-resolver": "^4.1.0",
+    "ethr-did-resolver": "^9.0.0",
+    "express": "^4.18.2",
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "viem": "^2.0.0"
+  },
+  "peerDependencies": {
+    "express": "^4.18.0",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.5.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "express": "^4.18.2",
+    "jsdom": "^25.0.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
+
+
