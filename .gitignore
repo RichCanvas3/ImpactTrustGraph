@@ -5,7 +5,9 @@ dist
 build
 .DS_Store
 .next
+
 .env
+
 .env.local
 .env.development
 .env.test
