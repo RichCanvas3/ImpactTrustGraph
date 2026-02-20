@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { useConnection } from "../../components/connection-context";
 import { useWeb3Auth } from "../../components/Web3AuthProvider";
@@ -33,7 +33,8 @@ import { OrgAgentSelector } from "../../components/OrgAgentSelector";
 type OrgType =
   | "organization"
   | "coalition"
-  | "contributor";
+  | "contributor"
+  | "funder";
 
 interface OrgDetails {
   name: string;
@@ -43,8 +44,11 @@ interface OrgDetails {
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6;
 
+type StakeholderRole = "coordinator" | "contributor" | "org-admin" | "funder" | "admin";
+
 export default function OnboardingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, setUser } = useConnection();
   const {
     web3auth,
@@ -70,6 +74,77 @@ export default function OnboardingPage() {
   const [existingIndividualProfile, setExistingIndividualProfile] = React.useState<UserProfile | null>(null);
   const [isCreatingItg, setIsCreatingItg] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const urlRole = React.useMemo<StakeholderRole | null>(() => {
+    const raw = searchParams?.get("role")?.trim().toLowerCase() ?? "";
+    if (!raw) return null;
+    if (raw === "coordinator") return "coordinator";
+    if (raw === "contributor") return "contributor";
+    if (raw === "org-admin" || raw === "organization-admin" || raw === "organization") return "org-admin";
+    if (raw === "funder" || raw === "grantmaker" || raw === "funder-grantmaker") return "funder";
+    if (raw === "admin" || raw === "system-admin") return "admin";
+    return null;
+  }, [searchParams]);
+
+  const effectiveRole: StakeholderRole = React.useMemo(() => {
+    if (urlRole) return urlRole;
+    const profRoleRaw = typeof existingIndividualProfile?.role === "string" ? existingIndividualProfile.role : "";
+    const profRole = profRoleRaw.trim().toLowerCase();
+    if (profRole === "coordinator") return "coordinator";
+    if (profRole === "contributor") return "contributor";
+    if (profRole === "org-admin" || profRole === "organization-admin" || profRole === "organization") return "org-admin";
+    if (profRole === "funder" || profRole === "grantmaker") return "funder";
+    if (profRole === "admin" || profRole === "system-admin") return "admin";
+    return "org-admin";
+  }, [urlRole, existingIndividualProfile?.role]);
+
+  const roleLabel = React.useMemo(() => {
+    switch (effectiveRole) {
+      case "coordinator":
+        return "Coordinator";
+      case "contributor":
+        return "Contributor";
+      case "funder":
+        return "Funder / Grantmaker";
+      case "admin":
+        return "System Admin";
+      case "org-admin":
+      default:
+        return "Organization Admin";
+    }
+  }, [effectiveRole]);
+
+  // Role-specific participant fields (stored in individuals.participant_metadata as JSON).
+  const [contributorSkills, setContributorSkills] = React.useState<string>("");
+  const [contributorAvailabilityHours, setContributorAvailabilityHours] = React.useState<string>("");
+  const [contributorEngagementPreferences, setContributorEngagementPreferences] = React.useState<string>("");
+
+  const [coordinatorCoalitionName, setCoordinatorCoalitionName] = React.useState<string>("");
+  const [coordinatorScope, setCoordinatorScope] = React.useState<string>("");
+
+  const [funderEntityName, setFunderEntityName] = React.useState<string>("");
+
+  // Role-specific organization fields (stored in organizations.org_metadata as JSON).
+  const [orgSector, setOrgSector] = React.useState<string>("");
+  const [orgPrograms, setOrgPrograms] = React.useState<string>("");
+  const [orgServiceAreas, setOrgServiceAreas] = React.useState<string>("");
+  const [orgAnnualBudget, setOrgAnnualBudget] = React.useState<string>("");
+
+  const [funderEntityType, setFunderEntityType] = React.useState<string>("");
+  const [funderFocusAreas, setFunderFocusAreas] = React.useState<string>("");
+  const [funderGeographicScope, setFunderGeographicScope] = React.useState<string>("");
+  const [funderComplianceRequirements, setFunderComplianceRequirements] = React.useState<string>("");
+
+  // Helpful defaults by role.
+  React.useEffect(() => {
+    setOrg((prev) => {
+      if (prev.type) return prev;
+      if (effectiveRole === "coordinator") return { ...prev, type: "coalition" };
+      if (effectiveRole === "contributor") return { ...prev, type: "contributor" };
+      if (effectiveRole === "funder") return { ...prev, type: "funder" };
+      return prev;
+    });
+  }, [effectiveRole]);
 
   // Participant agent (created for the individual onboarding)
   const [participantAgentName, setParticipantAgentName] = React.useState<string>("");
@@ -204,19 +279,42 @@ export default function OnboardingPage() {
     }
   }, [user, web3auth, step, walletAddress]);
 
-  // Save first and last name to database when they change on step 2
+  // Save profile details to database when they change on step 2
   React.useEffect(() => {
-    if (step === 2 && (walletAddress || userEmail) && (firstName || lastName)) {
+    if (step === 2 && (walletAddress || userEmail)) {
       // Debounce: only save after user stops typing for 500ms
       const timeoutId = setTimeout(async () => {
         try {
-          await saveUserProfile({
-            email: userEmail,
+          const participantMeta: Record<string, any> = {};
+          if (effectiveRole === "contributor") {
+            if (contributorSkills.trim()) participantMeta.skills = contributorSkills.trim();
+            if (contributorAvailabilityHours.trim()) {
+              const n = Number(contributorAvailabilityHours.trim());
+              participantMeta.availability_hours_per_week = Number.isFinite(n) ? n : contributorAvailabilityHours.trim();
+            }
+            if (contributorEngagementPreferences.trim()) {
+              participantMeta.engagement_preferences = contributorEngagementPreferences.trim();
+            }
+          } else if (effectiveRole === "coordinator") {
+            if (coordinatorCoalitionName.trim()) participantMeta.coalition_name = coordinatorCoalitionName.trim();
+            if (coordinatorScope.trim()) participantMeta.coordination_scope = coordinatorScope.trim();
+          } else if (effectiveRole === "funder") {
+            if (funderEntityName.trim()) participantMeta.funder_entity_name = funderEntityName.trim();
+          }
+
+          const payload: UserProfile = {
+            ...(userEmail ? { email: userEmail } : {}),
+            role: effectiveRole,
             first_name: firstName || null,
             last_name: lastName || null,
             eoa_address: walletAddress || null,
             aa_address: aaAddress || null,
-          });
+            ...(Object.keys(participantMeta).length > 0
+              ? { participant_metadata: JSON.stringify(participantMeta) }
+              : {}),
+          };
+
+          await saveUserProfile(payload);
 
           // Prefer first/last name for in-app display once set.
           const preferred = `${firstName} ${lastName}`.trim();
@@ -224,13 +322,29 @@ export default function OnboardingPage() {
             setUser({ ...user, name: preferred });
           }
         } catch (error) {
-          console.warn("Failed to save user profile (first/last name):", error);
+          console.warn("Failed to save user profile:", error);
         }
       }, 500);
 
       return () => clearTimeout(timeoutId);
     }
-  }, [step, userEmail, firstName, lastName, walletAddress, aaAddress]);
+  }, [
+    step,
+    userEmail,
+    walletAddress,
+    aaAddress,
+    firstName,
+    lastName,
+    effectiveRole,
+    contributorSkills,
+    contributorAvailabilityHours,
+    contributorEngagementPreferences,
+    coordinatorCoalitionName,
+    coordinatorScope,
+    funderEntityName,
+    user,
+    setUser,
+  ]);
 
   // Fetch AA address if missing when on step 2 and save to database
   React.useEffect(() => {
@@ -253,6 +367,7 @@ export default function OnboardingPage() {
                 try {
                   await saveUserProfile({
                     email: userEmail,
+                    role: effectiveRole,
                     first_name: firstName || null,
                     last_name: lastName || null,
                     eoa_address: walletAddress,
@@ -270,7 +385,7 @@ export default function OnboardingPage() {
       }
       void fetchAaAddress();
     }
-  }, [step, walletAddress, aaAddress, web3auth, userEmail, firstName, lastName]);
+  }, [step, walletAddress, aaAddress, web3auth, userEmail, firstName, lastName, effectiveRole]);
 
   // Step 2: if an individuals record already exists for this EOA, hydrate fields.
   const hydratedStep2EoaRef = React.useRef<string | null>(null);
@@ -322,6 +437,41 @@ export default function OnboardingPage() {
             prev ?? (typeof profile.participant_agent_id === "string" ? profile.participant_agent_id : null),
           );
         }
+
+        // Hydrate role-specific participant metadata (best-effort).
+        if (typeof (profile as any).participant_metadata === "string" && (profile as any).participant_metadata) {
+          try {
+            const parsed = JSON.parse((profile as any).participant_metadata);
+            if (parsed && typeof parsed === "object") {
+              setContributorSkills((prev) => (prev.trim() ? prev : (typeof (parsed as any).skills === "string" ? (parsed as any).skills : "")));
+              setContributorAvailabilityHours((prev) =>
+                prev.trim()
+                  ? prev
+                  : typeof (parsed as any).availability_hours_per_week === "number"
+                    ? String((parsed as any).availability_hours_per_week)
+                    : typeof (parsed as any).availability_hours_per_week === "string"
+                      ? (parsed as any).availability_hours_per_week
+                      : "",
+              );
+              setContributorEngagementPreferences((prev) =>
+                prev.trim() ? prev : (typeof (parsed as any).engagement_preferences === "string" ? (parsed as any).engagement_preferences : ""),
+              );
+
+              setCoordinatorCoalitionName((prev) =>
+                prev.trim() ? prev : (typeof (parsed as any).coalition_name === "string" ? (parsed as any).coalition_name : ""),
+              );
+              setCoordinatorScope((prev) =>
+                prev.trim() ? prev : (typeof (parsed as any).coordination_scope === "string" ? (parsed as any).coordination_scope : ""),
+              );
+
+              setFunderEntityName((prev) =>
+                prev.trim() ? prev : (typeof (parsed as any).funder_entity_name === "string" ? (parsed as any).funder_entity_name : ""),
+              );
+            }
+          } catch {
+            // ignore
+          }
+        }
       } catch (e) {
         if (!cancelled) {
           console.warn("[onboarding] Failed to hydrate individual profile for EOA (step 2):", e);
@@ -344,8 +494,23 @@ export default function OnboardingPage() {
     const eoa = walletAddress.toLowerCase();
     if (autoAdvancedEoaRef.current === eoa) return;
 
-    const hasNames = !!firstName.trim() || !!lastName.trim();
-    const hasParticipant = !!participantAgentDid;
+    // IMPORTANT: only auto-advance for already-saved profiles (hydration),
+    // not while the user is actively typing names in this step.
+    if (hydratedStep2EoaRef.current !== eoa) return;
+    if (!existingIndividualProfile) return;
+
+    const dbFirst =
+      typeof (existingIndividualProfile as any).first_name === "string"
+        ? (existingIndividualProfile as any).first_name.trim()
+        : "";
+    const dbLast =
+      typeof (existingIndividualProfile as any).last_name === "string"
+        ? (existingIndividualProfile as any).last_name.trim()
+        : "";
+    const hasNames = !!dbFirst || !!dbLast;
+    const hasParticipant =
+      typeof (existingIndividualProfile as any).participant_did === "string" &&
+      !!(existingIndividualProfile as any).participant_did;
 
     // If we already have everything for steps 2-3, jump to org step.
     if (hasNames && hasParticipant) {
@@ -359,7 +524,7 @@ export default function OnboardingPage() {
       autoAdvancedEoaRef.current = eoa;
       setStep(3);
     }
-  }, [step, walletAddress, firstName, lastName, participantAgentDid]);
+  }, [step, walletAddress, existingIndividualProfile]);
 
   // Step 3: if an individuals record already exists for this EOA, hydrate fields and allow continuing.
   const hydratedIndividualEoaRef = React.useRef<string | null>(null);
@@ -691,7 +856,7 @@ export default function OnboardingPage() {
             org_name: agent?.name || undefined,
             org_address: undefined,
             org_type: undefined,
-            email_domain: emailDomain ?? "",
+            email_domain: emailDomain ?? "unknown",
             agent_account: agentAccount || undefined,
             chain_id: chainId,
             is_primary: false,
@@ -706,7 +871,7 @@ export default function OnboardingPage() {
               org_name: agent?.name || undefined,
               org_address: undefined,
               org_type: undefined,
-              email_domain: emailDomain ?? "",
+              email_domain: emailDomain ?? "unknown",
               agent_account: agentAccount || undefined,
               chain_id: chainId,
               is_primary: false,
@@ -852,6 +1017,7 @@ export default function OnboardingPage() {
 
       await saveUserProfile({
         ...(userEmail ? { email: userEmail } : {}),
+        role: effectiveRole,
         first_name: firstName || null,
         last_name: lastName || null,
         phone_number: userPhone || null,
@@ -865,6 +1031,23 @@ export default function OnboardingPage() {
         participant_chain_id: sepolia.id,
         participant_did: did8004,
         participant_uaid: createdUaid,
+        participant_metadata: (() => {
+          const participantMeta: Record<string, any> = {};
+          if (effectiveRole === "contributor") {
+            if (contributorSkills.trim()) participantMeta.skills = contributorSkills.trim();
+            if (contributorAvailabilityHours.trim()) {
+              const n = Number(contributorAvailabilityHours.trim());
+              participantMeta.availability_hours_per_week = Number.isFinite(n) ? n : contributorAvailabilityHours.trim();
+            }
+            if (contributorEngagementPreferences.trim()) participantMeta.engagement_preferences = contributorEngagementPreferences.trim();
+          } else if (effectiveRole === "coordinator") {
+            if (coordinatorCoalitionName.trim()) participantMeta.coalition_name = coordinatorCoalitionName.trim();
+            if (coordinatorScope.trim()) participantMeta.coordination_scope = coordinatorScope.trim();
+          } else if (effectiveRole === "funder") {
+            if (funderEntityName.trim()) participantMeta.funder_entity_name = funderEntityName.trim();
+          }
+          return Object.keys(participantMeta).length ? JSON.stringify(participantMeta) : null;
+        })(),
       });
     } catch (e: any) {
       const msg = e?.message || String(e);
@@ -883,11 +1066,18 @@ export default function OnboardingPage() {
     participantEnsAvailability.available,
     userEmail,
     web3auth,
+    effectiveRole,
     firstName,
     lastName,
     aaAddress,
     userPhone,
     user?.name,
+    contributorSkills,
+    contributorAvailabilityHours,
+    contributorEngagementPreferences,
+    coordinatorCoalitionName,
+    coordinatorScope,
+    funderEntityName,
   ]);
 
   const handleOrgNext = React.useCallback(async () => {
@@ -1288,9 +1478,30 @@ export default function OnboardingPage() {
             org_name: org.name || undefined,
             org_address: org.address || undefined,
             org_type: org.type || undefined,
-            email_domain: emailDomain ?? "",
+            email_domain: emailDomain ?? "unknown",
             agent_account: actualAgentAccount,
             uaid: createdOrgUaid,
+            org_metadata: (() => {
+              const m: Record<string, any> = {};
+              if (effectiveRole === "org-admin") {
+                if (orgSector.trim()) m.sector = orgSector.trim();
+                if (orgPrograms.trim()) m.programs = orgPrograms.trim();
+                if (orgServiceAreas.trim()) m.service_areas = orgServiceAreas.trim();
+                if (orgAnnualBudget.trim()) {
+                  const n = Number(orgAnnualBudget.trim());
+                  m.annual_budget = Number.isFinite(n) ? n : orgAnnualBudget.trim();
+                }
+              } else if (effectiveRole === "funder") {
+                if (funderEntityType.trim()) m.entity_type = funderEntityType.trim();
+                if (funderFocusAreas.trim()) m.focus_areas = funderFocusAreas.trim();
+                if (funderGeographicScope.trim()) m.geographic_scope = funderGeographicScope.trim();
+                if (funderComplianceRequirements.trim()) m.compliance_requirements = funderComplianceRequirements.trim();
+              } else if (effectiveRole === "coordinator") {
+                if (coordinatorCoalitionName.trim()) m.coalition_name = coordinatorCoalitionName.trim();
+                if (coordinatorScope.trim()) m.coordination_scope = coordinatorScope.trim();
+              }
+              return Object.keys(m).length ? JSON.stringify(m) : null;
+            })(),
             chain_id: sepolia.id,
             is_primary: true, // This is the primary org based on email domain
           };
@@ -1410,7 +1621,7 @@ export default function OnboardingPage() {
     >
       <header style={{ marginBottom: "2rem" }}>
         <h1 style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>
-          Impact Onboarding
+          Impact Onboarding — {roleLabel}
         </h1>
         <p style={{ maxWidth: "40rem", lineHeight: 1.6 }}>
           Follow a few simple steps to register yourself, your Organization, and then continue into the application environment.
@@ -1527,54 +1738,11 @@ export default function OnboardingPage() {
                   </p>
                 </div>
               )}
-              {aaAddress && (
-                <div
-                  style={{
-                    marginTop: "0.5rem",
-                    fontSize: "0.85rem",
-                    color: "#6b7280",
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace"
-                  }}
-                >
-                  <p style={{ marginBottom: "0.25rem" }}>
-                  AA account: <span>{aaAddress}</span>
-                </p>
-                  <p style={{ marginTop: "0.15rem", fontSize: "0.8rem", color: "#9ca3af" }}>
-                    AA DID:ethr: <span>did:ethr:{sepolia.id}:{aaAddress}</span>
-                  </p>
-                </div>
-              )}
+              {/* AA account intentionally hidden in onboarding UI */}
             </div>
           )}
 
-          {walletAddress && existingIndividualProfile && (
-            <div
-              style={{
-                marginBottom: "1rem",
-                padding: "0.75rem",
-                borderRadius: "0.5rem",
-                border: "1px solid #e2e8f0",
-                backgroundColor: "#f8fafc",
-              }}
-            >
-              <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
-                Existing profile (by EOA)
-              </div>
-              <pre
-                style={{
-                  margin: 0,
-                  fontSize: "0.75rem",
-                  overflowX: "auto",
-                  whiteSpace: "pre",
-                  fontFamily:
-                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
-                }}
-              >
-                {JSON.stringify(existingIndividualProfile, null, 2)}
-              </pre>
-            </div>
-          )}
+          {/* removed debug output */}
 
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1604,6 +1772,119 @@ export default function OnboardingPage() {
                 }}
               />
             </label>
+          </div>
+
+          <div
+            style={{
+              marginTop: "1.25rem",
+              padding: "1rem",
+              borderRadius: "0.5rem",
+              border: "1px solid #e2e8f0",
+              backgroundColor: "#f8fafc",
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
+              Registration role: <span style={{ color: "#1e40af" }}>{roleLabel}</span>
+            </div>
+
+            {effectiveRole === "contributor" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span>Skills (comma-separated)</span>
+                  <input
+                    type="text"
+                    value={contributorSkills}
+                    onChange={(e) => setContributorSkills(e.target.value)}
+                    placeholder="e.g. Data Analysis, Grant Writing"
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid #cbd5f5",
+                    }}
+                  />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span>Availability (hours/week)</span>
+                  <input
+                    type="text"
+                    value={contributorAvailabilityHours}
+                    onChange={(e) => setContributorAvailabilityHours(e.target.value)}
+                    placeholder="e.g. 5"
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid #cbd5f5",
+                    }}
+                  />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span>Engagement preferences</span>
+                  <input
+                    type="text"
+                    value={contributorEngagementPreferences}
+                    onChange={(e) => setContributorEngagementPreferences(e.target.value)}
+                    placeholder="e.g. short engagements, remote-first"
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid #cbd5f5",
+                    }}
+                  />
+                </label>
+              </div>
+            )}
+
+            {effectiveRole === "coordinator" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span>Coalition name</span>
+                  <input
+                    type="text"
+                    value={coordinatorCoalitionName}
+                    onChange={(e) => setCoordinatorCoalitionName(e.target.value)}
+                    placeholder="e.g. Unite DFW"
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid #cbd5f5",
+                    }}
+                  />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span>Coordination scope</span>
+                  <input
+                    type="text"
+                    value={coordinatorScope}
+                    onChange={(e) => setCoordinatorScope(e.target.value)}
+                    placeholder="e.g. workforce + housing initiatives"
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid #cbd5f5",
+                    }}
+                  />
+                </label>
+              </div>
+            )}
+
+            {effectiveRole === "funder" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span>Funding entity name</span>
+                  <input
+                    type="text"
+                    value={funderEntityName}
+                    onChange={(e) => setFunderEntityName(e.target.value)}
+                    placeholder="e.g. Example Foundation"
+                    style={{
+                      padding: "0.5rem 0.75rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid #cbd5f5",
+                    }}
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
           <div
@@ -1716,33 +1997,7 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {walletAddress && existingIndividualProfile && (
-            <div
-              style={{
-                marginBottom: "1rem",
-                padding: "0.75rem",
-                borderRadius: "0.5rem",
-                border: "1px solid #e2e8f0",
-                backgroundColor: "#f8fafc",
-              }}
-            >
-              <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
-                Existing profile (by EOA)
-              </div>
-              <pre
-                style={{
-                  margin: 0,
-                  fontSize: "0.75rem",
-                  overflowX: "auto",
-                  whiteSpace: "pre",
-                  fontFamily:
-                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
-                }}
-              >
-                {JSON.stringify(existingIndividualProfile, null, 2)}
-              </pre>
-            </div>
-          )}
+          {/* removed debug output */}
 
           <div
             style={{
@@ -2168,7 +2423,8 @@ export default function OnboardingPage() {
               <p>
                 Signed in as{" "}
                 <strong>
-                  {user.name} ({user.email})
+                  {user.name}
+                  {userEmail ? ` (${userEmail})` : userPhone ? ` (${userPhone})` : ""}
                 </strong>
                 .
               </p>
@@ -2306,9 +2562,160 @@ export default function OnboardingPage() {
                 </option>
                 <option value="coalition">Coalition</option>
                 <option value="contributor">Contributor</option>
+                <option value="funder">Funder / Grantmaker</option>
                 
               </select>
             </label>
+
+            {effectiveRole === "org-admin" && (
+              <div
+                style={{
+                  padding: "1rem",
+                  borderRadius: "0.5rem",
+                  backgroundColor: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                }}
+              >
+                <div style={{ marginBottom: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>
+                  Organization profile
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>Sector</span>
+                    <input
+                      type="text"
+                      value={orgSector}
+                      onChange={(e) => setOrgSector(e.target.value)}
+                      placeholder="e.g. Workforce, Housing, Health"
+                      style={{
+                        padding: "0.5rem 0.75rem",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #cbd5f5",
+                      }}
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>Programs / service areas</span>
+                    <input
+                      type="text"
+                      value={orgPrograms}
+                      onChange={(e) => setOrgPrograms(e.target.value)}
+                      placeholder="e.g. job placement, wraparound services"
+                      style={{
+                        padding: "0.5rem 0.75rem",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #cbd5f5",
+                      }}
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>Geographic service areas</span>
+                    <input
+                      type="text"
+                      value={orgServiceAreas}
+                      onChange={(e) => setOrgServiceAreas(e.target.value)}
+                      placeholder="e.g. Dallas County, Tarrant County"
+                      style={{
+                        padding: "0.5rem 0.75rem",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #cbd5f5",
+                      }}
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>Approx annual budget (USD)</span>
+                    <input
+                      type="text"
+                      value={orgAnnualBudget}
+                      onChange={(e) => setOrgAnnualBudget(e.target.value)}
+                      placeholder="e.g. 2500000"
+                      style={{
+                        padding: "0.5rem 0.75rem",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #cbd5f5",
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {effectiveRole === "funder" && (
+              <div
+                style={{
+                  padding: "1rem",
+                  borderRadius: "0.5rem",
+                  backgroundColor: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                }}
+              >
+                <div style={{ marginBottom: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>
+                  Funder profile
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>Entity type</span>
+                    <select
+                      value={funderEntityType}
+                      onChange={(e) => setFunderEntityType(e.target.value)}
+                      style={{
+                        padding: "0.5rem 0.75rem",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #cbd5f5",
+                      }}
+                    >
+                      <option value="">Select…</option>
+                      <option value="foundation">Foundation</option>
+                      <option value="corporate">Corporate</option>
+                      <option value="individual">Individual</option>
+                      <option value="government">Government</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>Funding focus areas</span>
+                    <input
+                      type="text"
+                      value={funderFocusAreas}
+                      onChange={(e) => setFunderFocusAreas(e.target.value)}
+                      placeholder="e.g. workforce, housing, health equity"
+                      style={{
+                        padding: "0.5rem 0.75rem",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #cbd5f5",
+                      }}
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>Geographic scope</span>
+                    <input
+                      type="text"
+                      value={funderGeographicScope}
+                      onChange={(e) => setFunderGeographicScope(e.target.value)}
+                      placeholder="e.g. DFW Metroplex"
+                      style={{
+                        padding: "0.5rem 0.75rem",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #cbd5f5",
+                      }}
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>Compliance / reporting requirements</span>
+                    <input
+                      type="text"
+                      value={funderComplianceRequirements}
+                      onChange={(e) => setFunderComplianceRequirements(e.target.value)}
+                      placeholder="e.g. quarterly reports, outcomes attested"
+                      style={{
+                        padding: "0.5rem 0.75rem",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #cbd5f5",
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
 
           <div

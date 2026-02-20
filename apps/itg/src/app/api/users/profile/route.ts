@@ -35,6 +35,7 @@ async function ensureIndividualsSchema(db: D1Database) {
           `CREATE TABLE IF NOT EXISTS individuals (
             id INTEGER PRIMARY KEY,
             email TEXT UNIQUE,
+            role TEXT,
             first_name TEXT,
             last_name TEXT,
             phone_number TEXT,
@@ -50,6 +51,8 @@ async function ensureIndividualsSchema(db: D1Database) {
             participant_chain_id INTEGER,
             participant_did TEXT,
             participant_uaid TEXT,
+            participant_metadata TEXT,
+            trust_tier TEXT,
             created_at INTEGER NOT NULL DEFAULT (unixepoch()),
             updated_at INTEGER NOT NULL DEFAULT (unixepoch())
           );`,
@@ -61,14 +64,17 @@ async function ensureIndividualsSchema(db: D1Database) {
 
         await db.prepare(
           `INSERT INTO individuals (
-            id,email,first_name,last_name,social_account_id,social_account_type,eoa_address,aa_address,
+            id,email,role,first_name,last_name,social_account_id,social_account_type,eoa_address,aa_address,
             participant_ens_name,participant_agent_name,participant_agent_account,participant_agent_id,participant_chain_id,participant_did,participant_uaid,
+            participant_metadata,trust_tier,
             created_at,updated_at
           )
           SELECT
-            id,email,first_name,last_name,social_account_id,social_account_type,eoa_address,aa_address,
+            id,email,NULL as role,first_name,last_name,social_account_id,social_account_type,eoa_address,aa_address,
             participant_ens_name,participant_agent_name,participant_agent_account,participant_agent_id,participant_chain_id,participant_did,
             NULL as participant_uaid,
+            NULL as participant_metadata,
+            NULL as trust_tier,
             created_at,updated_at
           FROM individuals_legacy;`,
         ).run();
@@ -81,6 +87,7 @@ async function ensureIndividualsSchema(db: D1Database) {
     const info2 = await db.prepare("PRAGMA table_info(individuals)").all<{ name: string }>();
     const existing2 = new Set((info2.results || []).map((c) => c.name));
     const desired: Array<{ name: string; sql: string }> = [
+      { name: "role", sql: "ALTER TABLE individuals ADD COLUMN role TEXT" },
       { name: "phone_number", sql: "ALTER TABLE individuals ADD COLUMN phone_number TEXT" },
       { name: "social_display_name", sql: "ALTER TABLE individuals ADD COLUMN social_display_name TEXT" },
       { name: "participant_ens_name", sql: "ALTER TABLE individuals ADD COLUMN participant_ens_name TEXT" },
@@ -90,6 +97,8 @@ async function ensureIndividualsSchema(db: D1Database) {
       { name: "participant_chain_id", sql: "ALTER TABLE individuals ADD COLUMN participant_chain_id INTEGER" },
       { name: "participant_did", sql: "ALTER TABLE individuals ADD COLUMN participant_did TEXT" },
       { name: "participant_uaid", sql: "ALTER TABLE individuals ADD COLUMN participant_uaid TEXT" },
+      { name: "participant_metadata", sql: "ALTER TABLE individuals ADD COLUMN participant_metadata TEXT" },
+      { name: "trust_tier", sql: "ALTER TABLE individuals ADD COLUMN trust_tier TEXT" },
     ];
     for (const col of desired) {
       if (existing2.has(col.name)) continue;
@@ -189,6 +198,7 @@ export async function POST(request: NextRequest) {
     });
     const {
       email,
+      role,
       first_name,
       last_name,
       phone_number,
@@ -204,6 +214,8 @@ export async function POST(request: NextRequest) {
       participant_chain_id,
       participant_did,
       participant_uaid,
+      participant_metadata,
+      trust_tier,
     } = body;
 
     const cleanedEmail =
@@ -275,6 +287,7 @@ export async function POST(request: NextRequest) {
       const updateResult = await db.prepare(
         `UPDATE individuals 
          SET email = COALESCE(?, email),
+             role = COALESCE(?, role),
              first_name = COALESCE(?, first_name),
              last_name = COALESCE(?, last_name),
              phone_number = COALESCE(?, phone_number),
@@ -290,10 +303,13 @@ export async function POST(request: NextRequest) {
              participant_chain_id = COALESCE(?, participant_chain_id),
              participant_did = COALESCE(?, participant_did),
              participant_uaid = COALESCE(?, participant_uaid),
+             participant_metadata = COALESCE(?, participant_metadata),
+             trust_tier = COALESCE(?, trust_tier),
              updated_at = ?
          WHERE id = ?`
       ).bind(
         effectiveEmail,
+        typeof role === "string" ? role : null,
         typeof first_name === "string" ? first_name : null,
         typeof last_name === "string" ? last_name : null,
         typeof phone_number === "string" ? phone_number : null,
@@ -309,6 +325,8 @@ export async function POST(request: NextRequest) {
         typeof participant_chain_id === "number" ? participant_chain_id : null,
         typeof participant_did === "string" ? participant_did : null,
         typeof participant_uaid === "string" ? participant_uaid : null,
+        typeof participant_metadata === "string" ? participant_metadata : null,
+        typeof trust_tier === "string" ? trust_tier : null,
         now,
         existing.id
       ).run();
@@ -318,14 +336,16 @@ export async function POST(request: NextRequest) {
       console.log('[users/profile] Creating new profile');
       const insertResult = await db.prepare(
         `INSERT INTO individuals 
-         (email, first_name, last_name, phone_number, social_display_name, social_account_id, social_account_type, 
+         (email, role, first_name, last_name, phone_number, social_display_name, social_account_id, social_account_type, 
           eoa_address, aa_address,
           participant_ens_name, participant_agent_name, participant_agent_account,
           participant_agent_id, participant_chain_id, participant_did, participant_uaid,
+          participant_metadata, trust_tier,
           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         effectiveEmail,
+        typeof role === "string" ? role : null,
         first_name || null,
         last_name || null,
         phone_number || null,
@@ -341,6 +361,8 @@ export async function POST(request: NextRequest) {
         participant_chain_id || null,
         participant_did || null,
         participant_uaid || null,
+        typeof participant_metadata === "string" ? participant_metadata : null,
+        typeof trust_tier === "string" ? trust_tier : null,
         now,
         now
       ).run();

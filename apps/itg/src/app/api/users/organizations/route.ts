@@ -26,6 +26,13 @@ async function ensureOrganizationsSchema(db: D1Database) {
         // ignore
       }
     }
+    if (!existing.has("org_metadata")) {
+      try {
+        await db.prepare("ALTER TABLE organizations ADD COLUMN org_metadata TEXT").run();
+      } catch {
+        // ignore
+      }
+    }
   })();
   return ensureOrganizationsSchemaPromise;
 }
@@ -113,6 +120,7 @@ export async function GET(request: NextRequest) {
       email_domain: row.email_domain,
       agent_account: row.agent_account,
       uaid: (row as any).uaid ?? null,
+      org_metadata: (row as any).org_metadata ?? null,
       chain_id: row.chain_id,
       is_primary: row.is_primary === 1,
       role: row.role,
@@ -146,6 +154,7 @@ export async function POST(request: NextRequest) {
       email_domain,
       agent_account,
       uaid,
+      org_metadata,
       chain_id,
       is_primary,
       role,
@@ -214,8 +223,8 @@ export async function POST(request: NextRequest) {
       const insertResult = await db.prepare(
         `INSERT INTO organizations 
          (ens_name, agent_name, org_name, org_address, org_type, email_domain, 
-          agent_account, uaid, chain_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          agent_account, uaid, chain_id, org_metadata, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         ens_name,
         agent_name,
@@ -226,6 +235,7 @@ export async function POST(request: NextRequest) {
         agent_account || null,
         typeof uaid === "string" ? uaid : null,
         resolvedChainId,
+        typeof org_metadata === "string" ? org_metadata : null,
         now,
         now
       ).run();
@@ -237,7 +247,7 @@ export async function POST(request: NextRequest) {
       await db.prepare(
         `UPDATE organizations 
          SET agent_name = ?, org_name = ?, org_address = ?, org_type = ?, 
-             agent_account = ?, uaid = COALESCE(?, uaid), updated_at = ?
+             agent_account = ?, uaid = COALESCE(?, uaid), org_metadata = COALESCE(?, org_metadata), updated_at = ?
          WHERE ens_name = ?`
       ).bind(
         agent_name,
@@ -246,6 +256,7 @@ export async function POST(request: NextRequest) {
         org_type || null,
         agent_account || null,
         typeof uaid === "string" ? uaid : null,
+        typeof org_metadata === "string" ? org_metadata : null,
         now,
         ens_name
       ).run();

@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS individuals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT UNIQUE,
+  role TEXT, -- coordinator | contributor | org-admin | funder | admin
   first_name TEXT,
   last_name TEXT,
   phone_number TEXT,
@@ -19,6 +20,8 @@ CREATE TABLE IF NOT EXISTS individuals (
   participant_chain_id INTEGER, -- chain for participant agent (default sepolia)
   participant_did TEXT, -- did:8004:chainId:agentId
   participant_uaid TEXT, -- UAID for the participant smart account (e.g., HCS-14)
+  participant_metadata TEXT, -- JSON: role-specific fields (skills, availability, coalition, etc.)
+  trust_tier TEXT, -- Observer | Advisor | Coordinator | Steward (optional)
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
@@ -36,6 +39,7 @@ CREATE TABLE IF NOT EXISTS organizations (
   uaid TEXT, -- UAID for the organization's smart account (optional)
   chain_id INTEGER NOT NULL DEFAULT 11155111, -- Sepolia by default
   session_package TEXT, -- JSON string of sessionPackage for agent configuration
+  org_metadata TEXT, -- JSON: role-specific org fields (sector, programs, funder compliance, etc.)
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );

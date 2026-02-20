@@ -5,6 +5,7 @@
 
 export interface UserProfile {
   email?: string | null;
+  role?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   phone_number?: string | null;
@@ -20,6 +21,8 @@ export interface UserProfile {
   participant_chain_id?: number | null;
   participant_did?: string | null;
   participant_uaid?: string | null;
+  participant_metadata?: string | null; // JSON string
+  trust_tier?: string | null;
 }
 
 export function getPreferredIndividualDisplayName(profile: UserProfile | null | undefined): string | null {
@@ -41,6 +44,7 @@ export interface OrganizationAssociation {
   email_domain: string;
   agent_account?: string;
   uaid?: string | null;
+  org_metadata?: string | null; // JSON string
   chain_id?: number;
   is_primary?: boolean;
   role?: string;
@@ -53,6 +57,7 @@ export async function saveUserProfile(profile: UserProfile): Promise<UserProfile
   // Convert null to undefined for API compatibility
   const cleanedProfile = {
     ...(profile.email ? { email: profile.email } : {}),
+    role: profile.role ?? undefined,
     first_name: profile.first_name ?? undefined,
     last_name: profile.last_name ?? undefined,
     phone_number: profile.phone_number ?? undefined,
@@ -68,6 +73,8 @@ export async function saveUserProfile(profile: UserProfile): Promise<UserProfile
     participant_chain_id: profile.participant_chain_id ?? undefined,
     participant_did: profile.participant_did ?? undefined,
     participant_uaid: profile.participant_uaid ?? undefined,
+    participant_metadata: profile.participant_metadata ?? undefined,
+    trust_tier: profile.trust_tier ?? undefined,
   };
 
   const response = await fetch('/api/users/profile', {
