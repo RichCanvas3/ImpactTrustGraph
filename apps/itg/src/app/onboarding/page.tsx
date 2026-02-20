@@ -71,7 +71,6 @@ export default function OnboardingPage() {
     available: boolean | null;
     ensName: string | null;
   }>({ checking: false, available: null, ensName: null });
-  const [useFullDomain, setUseFullDomain] = React.useState<boolean>(false);
   const [customAgentName, setCustomAgentName] = React.useState<string>("");
 
   const emailDomain = React.useMemo(() => {
@@ -81,23 +80,12 @@ export default function OnboardingPage() {
     return parts[1].toLowerCase();
   }, [user?.email]);
 
-  /**
-   * Derive agent name from email domain
-   * @param domain - The email domain (e.g., "example.co.uk" or "example.com")
-   * @param useFull - If true, replace all dots with dashes. If false, use only first part.
-   * @returns Agent name (e.g., "example-co-uk-itg" or "example-itg")
-   */
-  const deriveAgentNameFromDomain = React.useCallback((domain: string | null, useFull: boolean): string => {
-    if (!domain) return "";
-    const domainParts = domain.split(".");
-    if (useFull) {
-      // Replace all dots with dashes: "example.co.uk" -> "example-co-uk-itg"
-      const domainBase = domainParts.slice(0, -1).join("-");
-      return `${domainBase}-itg`;
-    } else {
-      // Use only first part: "example.co.uk" -> "example-itg"
-      return `${domainParts[0]}-itg`;
-    }
+  const normalizedAgentName = React.useMemo(() => customAgentName.trim(), [customAgentName]);
+
+  const isValidAgentName = React.useCallback((name: string) => {
+    // Keep onboarding simple: require an ENS-label-safe name.
+    // No auto-suffixing (e.g. "-itg") and no derivation from email domain.
+    return /^[a-z0-9-]{3,63}$/.test(name) && !name.includes('--') && !name.startsWith('-') && !name.endsWith('-');
   }, []);
 
   // Surface any underlying Web3Auth initialization errors into the local error UI.
@@ -327,51 +315,54 @@ export default function OnboardingPage() {
     }
   }, [walletAddress, step, checkIfAgentExists]);
 
-  // Check ENS availability when on step 3 and emailDomain is available
+  // Check ENS availability when on step 3 and a name is provided.
   React.useEffect(() => {
-    if (step === 3 && emailDomain) {
-      async function checkENSAvailability() {
-        if (!emailDomain) return;
-        try {
-          // Calculate the ENS name that will be used
-          const agentName = customAgentName || deriveAgentNameFromDomain(emailDomain, useFullDomain);
-          const ensOrgName = "8004-agent";
-          const ensName = `${agentName}.${ensOrgName}.eth`;
-          const didEns = `did:ens:${sepolia.id}:${ensName}`;
-
-          setEnsAvailability({ checking: true, available: null, ensName });
-
-          // Check ENS availability
-          console.info(" @@@@@@@@@@@@ src/app/onboarding 2 did ens check: ", didEns);
-          
-          const encodedDidEns = encodeURIComponent(didEns);
-          const response = await fetch(`/api/names/${encodedDidEns}/is-available`);
-
-          if (response.ok) {
-            const result = await response.json();
-            setEnsAvailability({
-              checking: false,
-              available: result.available === true,
-              ensName
-            });
-          } else {
-            setEnsAvailability({
-              checking: false,
-              available: null,
-              ensName
-            });
-          }
-        } catch (error) {
-          console.warn("Failed to check ENS availability:", error);
-          setEnsAvailability(prev => ({ ...prev, checking: false }));
-        }
-      }
-
-      void checkENSAvailability();
-    } else {
+    if (step !== 3) {
       setEnsAvailability({ checking: false, available: null, ensName: null });
+      return;
     }
-  }, [step, emailDomain, useFullDomain, customAgentName, deriveAgentNameFromDomain]);
+
+    const agentName = normalizedAgentName;
+    if (!agentName || !isValidAgentName(agentName)) {
+      setEnsAvailability({ checking: false, available: null, ensName: null });
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const ensOrgName = "8004-agent";
+        const ensName = `${agentName}.${ensOrgName}.eth`;
+        const didEns = `did:ens:${sepolia.id}:${ensName}`;
+
+        setEnsAvailability({ checking: true, available: null, ensName });
+
+        const encodedDidEns = encodeURIComponent(didEns);
+        const response = await fetch(`/api/names/${encodedDidEns}/is-available`);
+        if (cancelled) return;
+
+        if (response.ok) {
+          const result = await response.json();
+          setEnsAvailability({
+            checking: false,
+            available: result.available === true,
+            ensName,
+          });
+          return;
+        }
+
+        setEnsAvailability({ checking: false, available: null, ensName });
+      } catch (error) {
+        if (cancelled) return;
+        console.warn("Failed to check ENS availability:", error);
+        setEnsAvailability({ checking: false, available: null, ensName: null });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [step, normalizedAgentName, isValidAgentName]);
 
   const { 
     handleStandardConnect, 
@@ -465,15 +456,16 @@ export default function OnboardingPage() {
       setError("Please complete all organization fields before continuing.");
       return;
     }
-    if (!emailDomain) {
-      setError(
-        "We could not determine your email domain. Please disconnect and reconnect, then try again."
-      );
+
+    const candidateName = normalizedAgentName;
+    if (!candidateName) {
+      setError("Please choose an agent name before continuing.");
       return;
     }
-
-    // Use custom agent name if provided, otherwise derive from domain
-    const candidateName = customAgentName || deriveAgentNameFromDomain(emailDomain, useFullDomain);
+    if (!isValidAgentName(candidateName)) {
+      setError('Agent name must be 3-63 chars: lowercase letters, numbers, and hyphens only.');
+      return;
+    }
     const ensOrgName = "8004-agent";
     const selectedChainId = sepolia.id;
 
@@ -494,7 +486,7 @@ export default function OnboardingPage() {
         console.warn("ENS availability check failed:", err);
         setError(
           err?.error ??
-            "Unable to check ATN domain availability. Please try again."
+            "Unable to check Impace domain availability. Please try again."
         );
         return;
       }
@@ -514,12 +506,12 @@ export default function OnboardingPage() {
     } catch (e) {
       console.error(e);
       setError(
-        "Unable to check ATN domain availability. Please try again in a moment."
+        "Unable to check Impace domain availability. Please try again in a moment."
       );
     } finally {
       setIsCheckingAvailability(false);
     }
-  }, [org, emailDomain, useFullDomain, customAgentName, deriveAgentNameFromDomain]);
+  }, [org, normalizedAgentName, isValidAgentName]);
 
   const handleDisconnectAndReset = React.useCallback(async () => {
     setError(null);
@@ -562,15 +554,18 @@ export default function OnboardingPage() {
     // Prevent creation if agent already exists
     if (agentExists) {
       setError(
-        `An ATN Identity already exists for your individual account. Agent name: ${existingAgentName || "Unknown"}.`
+        `An Impace Identity already exists for your individual account. Agent name: ${existingAgentName || "Unknown"}.`
       );
       return;
     }
 
-    if (!emailDomain) {
-      setError(
-        "We could not determine your email domain. Please disconnect and reconnect, then try again."
-      );
+    const agentName = normalizedAgentName;
+    if (!agentName) {
+      setError("Please enter an agent name.");
+      return;
+    }
+    if (!isValidAgentName(agentName)) {
+      setError('Agent name must be 3-63 chars: lowercase letters, numbers, and hyphens only.');
       return;
     }
 
@@ -614,8 +609,6 @@ export default function OnboardingPage() {
         return;
       }
 
-      // Use custom agent name if provided, otherwise derive from domain
-      const agentName = customAgentName || deriveAgentNameFromDomain(emailDomain, useFullDomain);
       // Compute the counterfactual AA address for the agent using the client helper.
       const agentAccountAddress = await getCounterfactualSmartAccountAddressByAgentName(
         agentName,
@@ -757,7 +750,7 @@ export default function OnboardingPage() {
           entityId: "trust-relationship",
           displayName: "Trust relationship",
           description:
-            "Trust relationship between individual AA and agent AA for ATN onboarding",
+            "Trust relationship between individual AA and agent AA for Impace onboarding",
           subjectDid,
           objectDid,
           relationshipType: "ally"
@@ -840,7 +833,7 @@ export default function OnboardingPage() {
             org_name: org.name || undefined,
             org_address: org.address || undefined,
             org_type: org.type || undefined,
-            email_domain: emailDomain,
+            email_domain: emailDomain ?? "",
             agent_account: actualAgentAccount,
             chain_id: sepolia.id,
             is_primary: true, // This is the primary org based on email domain
@@ -881,8 +874,8 @@ export default function OnboardingPage() {
         }
       }
 
-      // For the ATN onboarding UI, treat a successful client-side flow as success
-      // and use the human-readable agent name as the ATN identifier.
+      // For the Impace onboarding UI, treat a successful client-side flow as success
+      // and use the human-readable agent name as the Impace identifier.
       setItg(agentName);
       setStep(5);
     } catch (e) {
@@ -898,13 +891,13 @@ export default function OnboardingPage() {
           !errorMessage.includes('user rejected')) {
         // This is an unexpected error type, set generic message
         setError(
-          "An unexpected error occurred while creating your ATN Organization Identity. Please try again."
+          "An unexpected error occurred while creating your Impace Organization Identity. Please try again."
         );
       }
     } finally {
       setIsCreatingItg(false);
     }
-  }, [emailDomain, org.name, org.address, org.type, web3auth, agentExists, existingAgentName, user?.email, setDefaultOrgAgent, useFullDomain, customAgentName, deriveAgentNameFromDomain]);
+  }, [normalizedAgentName, isValidAgentName, org.name, org.address, org.type, web3auth, agentExists, existingAgentName, user?.email, setDefaultOrgAgent]);
 
   const goToAppEnvironment = () => {
     router.push("/app");
@@ -929,11 +922,11 @@ export default function OnboardingPage() {
     >
       <header style={{ marginBottom: "2rem" }}>
         <h1 style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>
-          Organization Onboarding
+          Impact NGO Onboarding
         </h1>
         <p style={{ maxWidth: "40rem", lineHeight: 1.6 }}>
-          Follow a few simple steps to register your organization, create an
-          ATN Organization Identity, and then continue into the application environment.
+          Follow a few simple steps to register your NGO, create an
+          NGO Organization Identity, and then continue into the application environment.
         </p>
       </header>
 
@@ -976,7 +969,7 @@ export default function OnboardingPage() {
           </h2>
           <p style={{ marginBottom: "1.25rem", lineHeight: 1.5 }}>
             We use Web3Auth to let you sign in with familiar social providers,
-            while also preparing a wallet that can be used for ATN operations.
+            while also preparing a wallet that can be used for Impace operations.
           </p>
 
           {isInitializing && (
@@ -1197,100 +1190,38 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {emailDomain && (
-            <div
-              style={{
-                padding: "1rem",
-                marginBottom: "1rem",
-                borderRadius: "0.5rem",
-                backgroundColor: "#f8fafc",
-                border: "1px solid #e2e8f0"
-              }}
-            >
-              <div style={{ marginBottom: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>
-                Agent Name Selection
-              </div>
-              <div style={{ marginBottom: "0.5rem", fontSize: "0.85rem", color: "#64748b" }}>
-                Choose how to derive the agent name from your email domain: <strong>{emailDomain}</strong>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    name="domainOption"
-                    checked={!useFullDomain}
-                    onChange={() => setUseFullDomain(false)}
-                    style={{ cursor: "pointer" }}
-                  />
-                  <div>
-                    <div style={{ fontWeight: 500 }}>
-                      Use first part only: <code style={{ backgroundColor: "#e2e8f0", padding: "0.1rem 0.3rem", borderRadius: "0.25rem" }}>{deriveAgentNameFromDomain(emailDomain, false)}</code>
-                    </div>
-                    <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.25rem" }}>
-                      Example: {emailDomain} → {emailDomain.split(".")[0]}-itg
-                    </div>
-                  </div>
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    name="domainOption"
-                    checked={useFullDomain}
-                    onChange={() => setUseFullDomain(true)}
-                    style={{ cursor: "pointer" }}
-                  />
-                  <div>
-                    <div style={{ fontWeight: 500 }}>
-                      Use full domain (dots → dashes): <code style={{ backgroundColor: "#e2e8f0", padding: "0.1rem 0.3rem", borderRadius: "0.25rem" }}>{deriveAgentNameFromDomain(emailDomain, true)}</code>
-                    </div>
-                    <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.25rem" }}>
-                      Example: {emailDomain} → {emailDomain.split(".").slice(0, -1).join("-")}-itg
-                    </div>
-                  </div>
-                </label>
-              </div>
+          <div
+            style={{
+              padding: "1rem",
+              marginBottom: "1rem",
+              borderRadius: "0.5rem",
+              backgroundColor: "#f8fafc",
+              border: "1px solid #e2e8f0",
+            }}
+          >
+            <div style={{ marginBottom: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>
+              Agent Name
             </div>
-          )}
-
-          {emailDomain && (
-            <div
-              style={{
-                padding: "1rem",
-                marginBottom: "1rem",
-                borderRadius: "0.5rem",
-                backgroundColor: "#f8fafc",
-                border: "1px solid #e2e8f0"
-              }}
-            >
-              <div style={{ marginBottom: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>
-                Custom Agent Name (Optional)
-              </div>
-              <div style={{ marginBottom: "0.5rem", fontSize: "0.85rem", color: "#64748b" }}>
-                You can customize the agent name, or leave blank to use the suggested name above.
-              </div>
-              <input
-                type="text"
-                value={customAgentName}
-                onChange={(e) => {
-                  const value = e.target.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
-                  setCustomAgentName(value);
-                }}
-                placeholder={deriveAgentNameFromDomain(emailDomain, useFullDomain)}
-                style={{
-                  width: "100%",
-                  padding: "0.5rem 0.75rem",
-                  borderRadius: "0.5rem",
-                  border: "1px solid #cbd5f5",
-                  fontSize: "0.9rem"
-                }}
-              />
-              {customAgentName && (
-                <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#64748b" }}>
-                  Agent name will be: <code style={{ backgroundColor: "#e2e8f0", padding: "0.1rem 0.3rem", borderRadius: "0.25rem" }}>{customAgentName}</code>
-                </div>
-              )}
+            <div style={{ marginBottom: "0.5rem", fontSize: "0.85rem", color: "#64748b" }}>
+              Enter the agent name you want to register (no automatic suffixes).
             </div>
-          )}
+            <input
+              type="text"
+              value={customAgentName}
+              onChange={(e) => setCustomAgentName(e.target.value)}
+              placeholder="e.g. richcanvas"
+              style={{
+                width: "100%",
+                padding: "0.5rem 0.75rem",
+                borderRadius: "0.5rem",
+                border: "1px solid #cbd5f5",
+                fontSize: "0.9rem",
+              }}
+            />
+            <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#64748b" }}>
+              Must be 3-63 chars: lowercase letters, numbers, hyphens.
+            </div>
+          </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1416,7 +1347,7 @@ export default function OnboardingPage() {
           
           {(() => {
             // Calculate the ENS name that will be used
-            const agentName = customAgentName || deriveAgentNameFromDomain(emailDomain, useFullDomain);
+            const agentName = normalizedAgentName;
             const ensOrgName = "8004-agent";
             const ensName = `${agentName}.${ensOrgName}.eth`;
             
@@ -1478,7 +1409,7 @@ export default function OnboardingPage() {
           })()}
 
           <p style={{ marginBottom: "1.5rem" }}>
-            Is it OK to create an ATN Organization Identity for this organization now?
+            Is it OK to create an Impace Organization Identity for this organization now?
           </p>
 
           {isCheckingAgent && (
@@ -1507,7 +1438,7 @@ export default function OnboardingPage() {
                 color: "#92400e"
               }}
             >
-              <strong>Agent already exists:</strong> An ATN Identity already exists for your individual account. 
+              <strong>Agent already exists:</strong> An Impace Identity already exists for your individual account. 
               The agent name is <strong>{existingAgentName}</strong>. You cannot create a second agent.
             </div>
           )}
@@ -1545,10 +1476,10 @@ export default function OnboardingPage() {
               }}
             >
               {isCreatingItg 
-                ? "Creating ATN Organization Identity…" 
+                ? "Creating Impace Organization Identity…" 
                 : isCheckingAgent 
                   ? "Checking for existing agent…" 
-                  : "Yes, create ATN Organization Identity"}
+                  : "Yes, create Impace Organization Identity"}
             </button>
           </div>
 
@@ -1577,7 +1508,7 @@ export default function OnboardingPage() {
               >
                 disconnect and sign in with a different account
               </button>{" "}
-              before creating the ATN Organization Identity.
+              before creating the Impace Organization Identity.
             </p>
           )}
         </section>
@@ -1594,11 +1525,11 @@ export default function OnboardingPage() {
           }}
         >
           <h2 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>
-            5. Your ATN Organization Identity
+            5. Your Impace Organization Identity
           </h2>
 
           <p style={{ marginBottom: "1rem", lineHeight: 1.5 }}>
-            The ATN Organization Identity for{" "}
+            The Impace Organization Identity for{" "}
             <strong>{org.name || "your organization"}</strong> has been
             created.
           </p>
@@ -1617,7 +1548,7 @@ export default function OnboardingPage() {
 
           <p style={{ marginTop: "1.25rem", marginBottom: "1.25rem" }}>
             Next, you&apos;ll move into the application environment where we
-            manage operations, resources, and alliances using this ATN.
+            manage operations, resources, and alliances using this Impace.
           </p>
 
           <button

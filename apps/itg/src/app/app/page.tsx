@@ -9,14 +9,14 @@ export default function ApplicationEnvironmentPage() {
           component="h1"
           sx={{ mb: 1.5, fontWeight: 600 }}
         >
-        ATN Application Environment
+        Impace Application Environment
         </Typography>
         <Typography
           variant="body1"
           sx={{ maxWidth: "42rem", lineHeight: 1.7, mb: 3 }}
         >
         This is the placeholder application environment where all ongoing work
-        related to ATN identities, operations, and coordination will take
+        related to Impace identities, operations, and coordination will take
           place. Dashboards, workflows, and collaboration tools can be
           introduced here as the program evolves.
         </Typography>
@@ -34,7 +34,7 @@ export default function ApplicationEnvironmentPage() {
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Use this space to integrate operational modules, reporting views,
-            and coordination tools consistent with official ATN guidance.
+            and coordination tools consistent with official Impace guidance.
           </Typography>
         </Box>
       </Container>

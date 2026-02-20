@@ -4,11 +4,11 @@
   "private": true,
   "description": "ITG Next.js app in the itg monorepo.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3004",
     "dev:cloudflare": "pnpm build && wrangler pages dev .next",
     "prebuild": "cd ../.. && pnpm --filter @my-scope/core build",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3004",
     "lint": "eslint . --ext ts,tsx,js,jsx"
   },
   "dependencies": {

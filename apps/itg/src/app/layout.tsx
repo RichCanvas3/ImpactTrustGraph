@@ -18,8 +18,8 @@ const WalletProvider = dynamic(
 );
 
 export const metadata: Metadata = {
-  title: "ATN App",
-  description: "ATN Next.js application in the itg monorepo."
+  title: "Impace App",
+  description: "Impace Next.js application in the itg monorepo."
 };
 
 export default function RootLayout({
