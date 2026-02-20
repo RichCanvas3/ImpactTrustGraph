@@ -7,7 +7,13 @@ import { sepolia } from "viem/chains";
 import { useWeb3Auth } from "./Web3AuthProvider";
 import { useConnection } from "./connection-context";
 import { IndivService } from "../app/service/indivService";
-import { saveUserProfile, associateUserWithOrganization, getUserOrganizations } from "../app/service/userProfileService";
+import {
+  saveUserProfile,
+  associateUserWithOrganization,
+  associateUserWithOrganizationByEoa,
+  getUserOrganizations,
+  getUserOrganizationsByEoa,
+} from "../app/service/userProfileService";
 import { useDefaultOrgAgent, type DefaultOrgAgent } from "./useDefaultOrgAgent";
 import { OrgAgentSelector } from "./OrgAgentSelector";
 
@@ -34,7 +40,7 @@ export function useStandardConnect() {
   // If skipSetDefaultAgent is true, it won't call setDefaultOrgAgent (useful when already set)
   const setAgentFromOrg = useCallback(async (
     org: any,
-    email: string,
+    email: string | null,
     indivAaAddress: string | null,
     account: string,
     skipSetDefaultAgent: boolean = false
@@ -85,7 +91,7 @@ export function useStandardConnect() {
                     ...agentData,
                   };
 
-                  setDefaultOrgAgent(defaultAgent, email);
+                  setDefaultOrgAgent(defaultAgent, email ?? undefined);
                 }
               }
             }
@@ -101,7 +107,7 @@ export function useStandardConnect() {
           agentName: org.agent_name,
           agentAccount: org.agent_account || "",
           chainId: org.chain_id || sepolia.id,
-        }, email);
+        }, email ?? undefined);
       }
     }
   }, [setDefaultOrgAgent]);
@@ -116,26 +122,39 @@ export function useStandardConnect() {
 
     // Step 2: Get user info and set connection state
     const userInfo = await getUserInfo();
-    const resolvedName = userInfo?.name ?? "Unknown user";
-    const resolvedEmail = userInfo?.email ?? "unknown@example.com";
+
+    const emailRaw = typeof userInfo?.email === "string" ? userInfo.email.trim() : "";
+    const emailLower = emailRaw.toLowerCase();
+    const cleanedEmail =
+      emailLower && emailLower.includes("@") && emailLower !== "unknown@example.com" ? emailRaw : null;
+
+    const verifierIdRaw = typeof userInfo?.verifierId === "string" ? userInfo.verifierId.trim() : "";
+    const phoneNumber = /^\+?[0-9][0-9\-\s()]{6,}$/.test(verifierIdRaw) ? verifierIdRaw : null;
+
+    const resolvedNameBase = userInfo?.name ?? "Unknown user";
+    const resolvedName = !cleanedEmail && phoneNumber ? phoneNumber : resolvedNameBase;
 
     setUser({
       name: resolvedName,
-      email: resolvedEmail
+      ...(cleanedEmail ? { email: cleanedEmail } : {}),
     });
 
-    // Save user profile to database (async, don't wait)
-    try {
-      await saveUserProfile({
-        email: resolvedEmail,
-        social_account_id: userInfo?.verifierId || userInfo?.id || null,
-        social_account_type: userInfo?.typeOfLogin || null,
-        eoa_address: null, // Will be set after we get the account
-        aa_address: null, // Will be set after we get the AA address
-      });
-    } catch (error) {
-      console.warn("Failed to save user profile:", error);
-      // Continue even if profile save fails
+    // If we don't have a real email, wait until we have an EOA to save the profile.
+    if (cleanedEmail) {
+      try {
+        await saveUserProfile({
+          email: cleanedEmail,
+          phone_number: phoneNumber,
+          social_display_name: resolvedNameBase,
+          social_account_id: userInfo?.verifierId || userInfo?.id || null,
+          social_account_type: userInfo?.typeOfLogin || null,
+          eoa_address: null, // Will be set after we get the account
+          aa_address: null, // Will be set after we get the AA address
+        });
+      } catch (error) {
+        console.warn("Failed to save user profile:", error);
+        // Continue even if profile save fails
+      }
     }
 
     // Step 3: Get wallet address
@@ -159,7 +178,9 @@ export function useStandardConnect() {
     // Update user profile with EOA address immediately
     try {
       await saveUserProfile({
-        email: resolvedEmail,
+        email: cleanedEmail,
+        phone_number: phoneNumber,
+        social_display_name: resolvedNameBase,
         eoa_address: account,
       });
     } catch (error) {
@@ -180,8 +201,10 @@ export function useStandardConnect() {
           indivAaAddress = addr;
           // Update user profile with AA address immediately
           try {
-            await saveUserProfile({
-              email: resolvedEmail,
+              await saveUserProfile({
+                email: cleanedEmail,
+                phone_number: phoneNumber,
+                social_display_name: resolvedNameBase,
               eoa_address: account,
               aa_address: addr,
             });
@@ -197,8 +220,8 @@ export function useStandardConnect() {
 
     // Step 5: Check for all organizations associated with this user's email
     // If multiple exist, show selector. If one exists, use it. If none, continue onboarding.
-    const email = resolvedEmail;
-    if (email && email.includes("@")) {
+    const email = cleanedEmail;
+    if (email) {
       try {
         // First, get all organizations for this user
         const userOrgs = await getUserOrganizations(email);
@@ -248,7 +271,9 @@ export function useStandardConnect() {
               // Update user profile with EOA and AA addresses
               try {
                 await saveUserProfile({
-                  email: resolvedEmail,
+                  email: cleanedEmail,
+                  phone_number: phoneNumber,
+                  social_display_name: resolvedNameBase,
                   eoa_address: account,
                   aa_address: indivAaAddress || null,
                 });
@@ -258,12 +283,18 @@ export function useStandardConnect() {
 
               // Associate user with organization (async, don't wait)
               try {
-                await associateUserWithOrganization(resolvedEmail, {
+                const orgPayload = {
                   ens_name: ensName,
                   agent_name: agentName,
                   email_domain: emailDomain,
                   is_primary: true, // This is the primary org based on email domain
-                });
+                };
+
+                if (cleanedEmail) {
+                  await associateUserWithOrganization(cleanedEmail, orgPayload);
+                } else {
+                  await associateUserWithOrganizationByEoa(account, orgPayload, null);
+                }
               } catch (error) {
                 console.warn("Failed to associate user with organization:", error);
               }
@@ -315,8 +346,8 @@ export function useStandardConnect() {
 
 
                           // Pass email directly to ensure localStorage is saved even if user context isn't ready
-                          console.info("[useStandardConnect] Setting default org agent with email:", resolvedEmail);
-                          setDefaultOrgAgent(defaultAgent, resolvedEmail);
+                          console.info("[useStandardConnect] Setting default org agent with email:", cleanedEmail || "none");
+                          setDefaultOrgAgent(defaultAgent, cleanedEmail ?? undefined);
                           console.info("[useStandardConnect] Default org agent set, DID:", defaultAgent.did);
 
                           // Long-term cache of full agent details by DID, so
@@ -376,7 +407,7 @@ export function useStandardConnect() {
                   agentName,
                   agentAccount: "",
                   chainId: sepolia.id,
-                }, resolvedEmail);
+                }, cleanedEmail ?? undefined);
               }
 
               // Organization exists - show selector instead of auto-redirecting
@@ -428,12 +459,27 @@ export function useStandardConnect() {
         console.warn("Failed to check ENS availability for organization:", ensCheckError);
         // Continue with normal flow if check fails
       }
+    } else {
+      // No email available (e.g. phone login). Try EOA-based org associations.
+      try {
+        const userOrgs = await getUserOrganizationsByEoa(account);
+        if (userOrgs.length > 0) {
+          setAvailableOrgs(userOrgs);
+          setPendingIndivAaAddress(indivAaAddress);
+          setShowOrgSelector(true);
+          return { hasAgent: true, account, indivAaAddress, needsSelection: true };
+        }
+      } catch (e) {
+        console.warn("[useStandardConnect] Failed to fetch orgs by EOA:", e);
+      }
     }
 
     console.info(" ********** updating user profile **********");
     try {
       await saveUserProfile({
-        email: resolvedEmail,
+        email: cleanedEmail,
+        phone_number: phoneNumber,
+        social_display_name: resolvedNameBase,
         eoa_address: account,
         aa_address: indivAaAddress || null,
       });
@@ -461,8 +507,9 @@ export function useStandardConnect() {
       return;
     }
 
-    // Get user email from connection context (should be set during connect)
-    const email = user?.email || "unknown@example.com";
+    // Use a real email only; phone logins often return placeholders.
+    const emailRaw = typeof user?.email === "string" ? user.email.trim() : "";
+    const email = emailRaw && emailRaw.toLowerCase() !== "unknown@example.com" && emailRaw.includes("@") ? emailRaw : null;
     
     // Get account address if we have it stored
     let account = "";
@@ -581,7 +628,7 @@ export function useStandardConnect() {
       agentId: fullAgent.agentId,
       did: fullAgent.did,
     });
-    setDefaultOrgAgent(fullAgent, email);
+    setDefaultOrgAgent(fullAgent, email ?? undefined);
     
     // Update user profile (skip setting default agent since we already set it above)
     if (pendingIndivAaAddress) {

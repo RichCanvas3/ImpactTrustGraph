@@ -879,7 +879,7 @@ export default function AgentsRoute() {
                   }
 
                   if (!web3auth?.provider) {
-                    throw new Error('Connect your wallet to register with alliance organization');
+                    throw new Error('Connect your wallet to register with coalition');
                   }
 
                   // Check if user has a default org agent
@@ -928,9 +928,9 @@ export default function AgentsRoute() {
                     }
                   );
 
-                  console.log('[Alliance Registration] Agent Account Client keys:', Object.keys(agentAccountClient));
-                  console.log('[Alliance Registration] Has sendTransaction:', typeof agentAccountClient.sendTransaction);
-                  console.log('[Alliance Registration] Has sendUserOperation:', typeof agentAccountClient.sendUserOperation);
+                  console.log('[Coalition Registration] Agent Account Client keys:', Object.keys(agentAccountClient));
+                  console.log('[Coalition Registration] Has sendTransaction:', typeof agentAccountClient.sendTransaction);
+                  console.log('[Coalition Registration] Has sendUserOperation:', typeof agentAccountClient.sendUserOperation);
 
                   // Build did8004 for the validation request using the selected agent
                   const queryAgentId = typeof selectedAgent.agentId === 'bigint' 
@@ -951,12 +951,12 @@ export default function AgentsRoute() {
                   const requestJson = {
                     agentId: queryAgentId,
                     validatorAddress: selectedAgent.agentAccount as `0x${string}`,
-                    checks: ["Alliance Membership"]
+                    checks: ["Coalition Membership"]
                   };
                   const requestHash = keccak256(toHex(JSON.stringify(requestJson)));
                   
                   // Upload requestJson to IPFS
-                  console.log('[Alliance Registration] Uploading validation request to IPFS...');
+                  console.log('[Coalition Registration] Uploading validation request to IPFS...');
                   const jsonBlob = new Blob([JSON.stringify(requestJson, null, 2)], { type: 'application/json' });
                   const formData = new FormData();
                   formData.append('file', jsonBlob, 'validation-request.json');
@@ -973,7 +973,7 @@ export default function AgentsRoute() {
                   const ipfsResult = await ipfsResponse.json();
                   const requestUri = ipfsResult.url || ipfsResult.tokenUri || `ipfs://${ipfsResult.cid}`;
                   
-                  console.log('[Alliance Registration] IPFS upload result:', { cid: ipfsResult.cid, url: requestUri });
+                  console.log('[Coalition Registration] IPFS upload result:', { cid: ipfsResult.cid, url: requestUri });
 
                   // Submit validation request using the selected agent's account address
                   const result = await requestValidationWithWallet({
@@ -983,10 +983,10 @@ export default function AgentsRoute() {
                     chain: chain as any,
                     requestUri,
                     requestHash,
-                    onStatusUpdate: (msg: string) => console.log('[Alliance Registration]', msg),
+                    onStatusUpdate: (msg: string) => console.log('[Coalition Registration]', msg),
                   });
 
-                  console.info('[Alliance Registration] Success:', result);
+                  console.info('[Coalition Registration] Success:', result);
 
                   // Send message to validator agent about the validation request
                   // This message will appear in the validator's inbox
@@ -994,7 +994,7 @@ export default function AgentsRoute() {
                     const selectedAgentDid = buildDid8004(chainId, BigInt(queryAgentId));
                     const selectedAgentName = selectedAgent.ensName || selectedAgent.agentName || selectedAgent.name || undefined;
 
-                    console.info('[Alliance Registration] Sending validation request message to validator agent inbox...');
+                    console.info('[Coalition Registration] Sending validation request message to validator agent inbox...');
                     
                     await sendValidationRequestMessage({
                       fromAgentDid: defaultAgentDid8004,
@@ -1006,9 +1006,9 @@ export default function AgentsRoute() {
                       body: `A validation request has been submitted for your review.\n\nRequest Hash: ${result.requestHash || requestHash}\nRequester Agent: ${defaultAgentName}\nRequester DID: ${defaultAgentDid8004}`,
                     });
 
-                    console.info('[Alliance Registration] Validation request message sent to validator agent inbox');
+                    console.info('[Coalition Registration] Validation request message sent to validator agent inbox');
                   } catch (messageError) {
-                    console.error('[Alliance Registration] Failed to send validation request message:', messageError);
+                    console.error('[Coalition Registration] Failed to send validation request message:', messageError);
                     // Log error but don't fail the whole operation if message sending fails
                   }
 
@@ -1016,16 +1016,16 @@ export default function AgentsRoute() {
                   
                   setSelectedAgent(null);
                 } catch (err) {
-                  console.error('Failed to register with alliance organization:', err);
+                  console.error('Failed to register with coalition organization:', err);
                   
                   // Check if the error is about an existing validation
                   const errorMessage = err instanceof Error ? err.message : String(err);
-                  let userFriendlyMessage = 'Failed to register with alliance organization';
+                  let userFriendlyMessage = 'Failed to register with coalition organization';
                   
                   if (errorMessage.includes('exists') || 
                       errorMessage.includes('0x08c379a0') ||
                       errorMessage.includes('657869737473')) {
-                    userFriendlyMessage = 'A validation request for this agent already exists. You may have already registered with this alliance organization.';
+                    userFriendlyMessage = 'A validation request for this agent already exists. You may have already registered with this coalition organization.';
                   } else if (errorMessage.includes('reverted')) {
                     userFriendlyMessage = 'The validation request was rejected. This may be because a validation already exists or the request is invalid.';
                   } else {

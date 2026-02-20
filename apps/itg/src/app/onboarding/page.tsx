@@ -18,14 +18,22 @@ import {
   AttestationService,
   type TrustRelationshipAttestation
 } from "../service/attestationService";
-import { saveUserProfile, associateUserWithOrganization } from "../service/userProfileService";
+import {
+  saveUserProfile,
+  associateUserWithOrganization,
+  associateUserWithOrganizationByEoa,
+  getUserProfile,
+  getUserOrganizations,
+  type OrganizationAssociation,
+  type UserProfile,
+} from "../service/userProfileService";
 import { useDefaultOrgAgent, type DefaultOrgAgent } from "../../components/useDefaultOrgAgent";
 import { OrgAgentSelector } from "../../components/OrgAgentSelector";
 
 type OrgType =
-  | "operationalRelief"
-  | "resource"
-  | "alliance";
+  | "organization"
+  | "coalition"
+  | "contributor";
 
 interface OrgDetails {
   name: string;
@@ -33,7 +41,7 @@ interface OrgDetails {
   type: OrgType | "";
 }
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4 | 5 | 6;
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -44,13 +52,11 @@ export default function OnboardingPage() {
     error: authError,
     connect,
     logout,
-    getUserInfo
   } = useWeb3Auth();
 
   const [step, setStep] = React.useState<Step>(1);
   const [isConnecting, setIsConnecting] = React.useState(false);
-  const [isCheckingAvailability, setIsCheckingAvailability] =
-    React.useState(false);
+  const [isCheckingAvailability, setIsCheckingAvailability] = React.useState(false);
   const [org, setOrg] = React.useState<OrgDetails>({
     name: "",
     address: "",
@@ -61,17 +67,40 @@ export default function OnboardingPage() {
   const [aaAddress, setAaAddress] = React.useState<string | null>(null);
   const [firstName, setFirstName] = React.useState<string>("");
   const [lastName, setLastName] = React.useState<string>("");
+  const [existingIndividualProfile, setExistingIndividualProfile] = React.useState<UserProfile | null>(null);
   const [isCreatingItg, setIsCreatingItg] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [agentExists, setAgentExists] = React.useState(false);
-  const [existingAgentName, setExistingAgentName] = React.useState<string | null>(null);
-  const [isCheckingAgent, setIsCheckingAgent] = React.useState(false);
-  const [ensAvailability, setEnsAvailability] = React.useState<{
+
+  // Participant agent (created for the individual onboarding)
+  const [participantAgentName, setParticipantAgentName] = React.useState<string>("");
+  const [isCreatingParticipant, setIsCreatingParticipant] = React.useState(false);
+  const [participantAgentAccount, setParticipantAgentAccount] = React.useState<string | null>(null);
+  const [participantEnsName, setParticipantEnsName] = React.useState<string | null>(null);
+  const [participantAgentDid, setParticipantAgentDid] = React.useState<string | null>(null);
+  const [participantAgentId, setParticipantAgentId] = React.useState<string | null>(null);
+  const [participantEnsAvailability, setParticipantEnsAvailability] = React.useState<{
+    checking: boolean;
+    available: boolean | null;
+    ensName: string | null;
+  }>({ checking: false, available: null, ensName: null });
+
+  // Organization agent (existing flow)
+  const [orgEnsAvailability, setOrgEnsAvailability] = React.useState<{
     checking: boolean;
     available: boolean | null;
     ensName: string | null;
   }>({ checking: false, available: null, ensName: null });
   const [customAgentName, setCustomAgentName] = React.useState<string>("");
+
+  const [orgChoice, setOrgChoice] = React.useState<"connect" | "skip" | "create">("create");
+  const [userOrganizations, setUserOrganizations] = React.useState<OrganizationAssociation[]>([]);
+  const [isLoadingOrganizations, setIsLoadingOrganizations] = React.useState(false);
+  const [showOrgConnectSelector, setShowOrgConnectSelector] = React.useState(false);
+
+  const [orgSearchQuery, setOrgSearchQuery] = React.useState<string>("");
+  const [orgSearchResults, setOrgSearchResults] = React.useState<any[]>([]);
+  const [orgSearchLoading, setOrgSearchLoading] = React.useState(false);
+  const [orgSearchError, setOrgSearchError] = React.useState<string | null>(null);
 
   const emailDomain = React.useMemo(() => {
     if (!user?.email) return null;
@@ -80,7 +109,37 @@ export default function OnboardingPage() {
     return parts[1].toLowerCase();
   }, [user?.email]);
 
-  const normalizedAgentName = React.useMemo(() => customAgentName.trim(), [customAgentName]);
+  const userEmail = React.useMemo(() => {
+    const raw = typeof user?.email === "string" ? user.email.trim() : "";
+    if (!raw) return null;
+    if (raw.toLowerCase() === "unknown@example.com") return null;
+    if (!raw.includes("@")) return null;
+    return raw;
+  }, [user?.email]);
+
+  const userPhone = React.useMemo(() => {
+    const raw = typeof user?.name === "string" ? user.name.trim() : "";
+    if (!raw) return null;
+    // Matches values like "+1-3039446151" or "(303) 944-6151"
+    return /^\+?[0-9][0-9\-\s()]{6,}$/.test(raw) ? raw : null;
+  }, [user?.name]);
+
+  const normalizedOrgAgentName = React.useMemo(() => customAgentName.trim(), [customAgentName]);
+  const normalizedParticipantAgentName = React.useMemo(
+    () => participantAgentName.trim(),
+    [participantAgentName],
+  );
+
+  const suggestedParticipantAgentName = React.useMemo(() => {
+    const first = firstName.trim().toLowerCase();
+    const last = lastName.trim().toLowerCase();
+    const base = [first, last].filter(Boolean).join("-");
+    // ENS-label-safe-ish: keep a-z0-9-, collapse separators, trim.
+    return base
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }, [firstName, lastName]);
 
   const isValidAgentName = React.useCallback((name: string) => {
     // Keep onboarding simple: require an ENS-label-safe name.
@@ -88,86 +147,20 @@ export default function OnboardingPage() {
     return /^[a-z0-9-]{3,63}$/.test(name) && !name.includes('--') && !name.startsWith('-') && !name.endsWith('-');
   }, []);
 
+  // Default participant agent name from first/last (one-time, don't overwrite edits).
+  React.useEffect(() => {
+    if (step !== 3) return;
+    if (participantAgentName.trim()) return;
+    if (!suggestedParticipantAgentName) return;
+    setParticipantAgentName(suggestedParticipantAgentName);
+  }, [step, participantAgentName, suggestedParticipantAgentName]);
+
   // Surface any underlying Web3Auth initialization errors into the local error UI.
   React.useEffect(() => {
     if (authError) {
       setError(authError);
     }
   }, [authError]);
-
-  /**
-   * Check if an agent already exists for the individual's AA account
-   */
-  const checkIfAgentExists = React.useCallback(async (eoaAccount: string) => {
-    console.info("check if agent exists for individual AA account...");
-    if (!eoaAccount || typeof eoaAccount !== "string" || !eoaAccount.startsWith("0x")) {
-      return false;
-    }
-
-    if (!web3auth?.provider) {
-      console.warn("Web3Auth provider not available for AA account check");
-      return false;
-    }
-
-    setIsCheckingAgent(true);
-    try {
-      // Get the individual AA account address
-      const provider = (web3auth as any).provider as
-        | { request: (args: { method: string; params?: any[] }) => Promise<any> }
-        | undefined;
-
-      if (!provider) {
-        return false;
-      }
-
-      const indivAccountClient = await IndivService.getCounterfactualAccountClientByIndividual(
-        eoaAccount as `0x${string}`,
-        { ethereumProvider: provider }
-      );
-
-      if (!indivAccountClient || typeof indivAccountClient.getAddress !== "function") {
-        console.warn("Failed to get individual AA account client");
-        return false;
-      }
-
-      const indivAaAddress = await indivAccountClient.getAddress();
-      if (!indivAaAddress || typeof indivAaAddress !== "string") {
-        console.warn("Failed to get individual AA account address");
-        return false;
-      }
-
-      // Check if agent exists for the individual AA account
-      const didEthr = `did:ethr:${sepolia.id}:${indivAaAddress}`;
-      const encodedDid = encodeURIComponent(didEthr);
-
-      console.info("......... checking AA account: ", encodedDid);
-      const checkResponse = await fetch(
-        `/api/agents/by-account/${encodedDid}`
-      );
-
-      console.info("......... checkResponse: ", checkResponse);
-      if (checkResponse.ok) {
-        const result = await checkResponse.json();
-        // Check if agent was found (endpoint returns found: true/false)
-        if (result?.found === true && result?.name) {
-          setAgentExists(true);
-          setExistingAgentName(result.name);
-          return true;
-        }
-      }
-      // If found: false or other error, no agent exists
-      setAgentExists(false);
-      setExistingAgentName(null);
-      return false;
-    } catch (checkError) {
-      console.warn("Failed to check for existing agent:", checkError);
-      setAgentExists(false);
-      setExistingAgentName(null);
-      return false;
-    } finally {
-      setIsCheckingAgent(false);
-    }
-  }, [web3auth]);
 
   // Removed automatic redirect - users should complete onboarding flow manually
 
@@ -209,49 +202,14 @@ export default function OnboardingPage() {
     }
   }, [user, web3auth, step, walletAddress]);
 
-  // Pre-populate firstName and lastName from Web3Auth when on step 2
-  React.useEffect(() => {
-    if (step === 2 && user && web3auth && (!firstName || !lastName)) {
-      async function populateUserDetails() {
-        try {
-          const userInfo = await getUserInfo();
-          if (userInfo?.name && typeof userInfo.name === "string") {
-            const name = userInfo.name.trim();
-            
-            // Check if the name is actually an email address
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (emailRegex.test(name)) {
-              // If name is an email, don't populate firstName/lastName
-              return;
-            }
-            
-            const nameParts = name.split(/\s+/);
-            if (nameParts.length > 0 && !firstName) {
-              setFirstName(nameParts[0]);
-            }
-            if (nameParts.length > 1 && !lastName) {
-              setLastName(nameParts.slice(1).join(" "));
-            } else if (nameParts.length === 1 && !lastName) {
-              // If only one name part, leave lastName empty or use first name
-              // You could also set lastName to empty string or the same as firstName
-            }
-          }
-        } catch (error) {
-          console.warn("Failed to get user info for pre-population:", error);
-        }
-      }
-      void populateUserDetails();
-    }
-  }, [step, user, web3auth, firstName, lastName, getUserInfo]);
-
   // Save first and last name to database when they change on step 2
   React.useEffect(() => {
-    if (step === 2 && user?.email && (firstName || lastName)) {
+    if (step === 2 && (walletAddress || userEmail) && (firstName || lastName)) {
       // Debounce: only save after user stops typing for 500ms
       const timeoutId = setTimeout(async () => {
         try {
           await saveUserProfile({
-            email: user.email,
+            email: userEmail,
             first_name: firstName || null,
             last_name: lastName || null,
             eoa_address: walletAddress || null,
@@ -264,7 +222,7 @@ export default function OnboardingPage() {
 
       return () => clearTimeout(timeoutId);
     }
-  }, [step, user?.email, firstName, lastName, walletAddress, aaAddress]);
+  }, [step, userEmail, firstName, lastName, walletAddress, aaAddress]);
 
   // Fetch AA address if missing when on step 2 and save to database
   React.useEffect(() => {
@@ -284,18 +242,16 @@ export default function OnboardingPage() {
               if (addr && typeof addr === "string") {
                 setAaAddress(addr);
                 // Save AA address to database immediately
-                if (user?.email) {
-                  try {
-                    await saveUserProfile({
-                      email: user.email,
-                      first_name: firstName || null,
-                      last_name: lastName || null,
-                      eoa_address: walletAddress,
-                      aa_address: addr,
-                    });
-                  } catch (error) {
-                    console.warn("Failed to save user profile (AA address):", error);
-                  }
+                try {
+                  await saveUserProfile({
+                    email: userEmail,
+                    first_name: firstName || null,
+                    last_name: lastName || null,
+                    eoa_address: walletAddress,
+                    aa_address: addr,
+                  });
+                } catch (error) {
+                  console.warn("Failed to save user profile (AA address):", error);
                 }
               }
             }
@@ -306,25 +262,165 @@ export default function OnboardingPage() {
       }
       void fetchAaAddress();
     }
-  }, [step, walletAddress, aaAddress, web3auth, user?.email, firstName, lastName]);
+  }, [step, walletAddress, aaAddress, web3auth, userEmail, firstName, lastName]);
 
-  // Check for existing agent when wallet address is available and we're on step 4
+  // Step 2: if an individuals record already exists for this EOA, hydrate fields.
+  const hydratedStep2EoaRef = React.useRef<string | null>(null);
+  const hydratingStep2Ref = React.useRef(false);
   React.useEffect(() => {
-    if (walletAddress && step === 4) {
-      void checkIfAgentExists(walletAddress);
-    }
-  }, [walletAddress, step, checkIfAgentExists]);
+    if (step !== 2) return;
+    if (!walletAddress) return;
+    const eoa = walletAddress.toLowerCase();
+    if (hydratedStep2EoaRef.current === eoa) return;
+    if (hydratingStep2Ref.current) return;
 
-  // Check ENS availability when on step 3 and a name is provided.
+    let cancelled = false;
+    hydratingStep2Ref.current = true;
+
+    (async () => {
+      try {
+        const profile = await getUserProfile(undefined, eoa);
+        if (cancelled || !profile) return;
+        hydratedStep2EoaRef.current = eoa;
+        setExistingIndividualProfile(profile);
+
+        // Only prefill if user hasn't typed yet.
+        if (typeof profile.first_name === "string") {
+          setFirstName((prev) => (prev.trim() ? prev : profile.first_name || ""));
+        }
+        if (typeof profile.last_name === "string") {
+          setLastName((prev) => (prev.trim() ? prev : profile.last_name || ""));
+        }
+        if (typeof profile.aa_address === "string" && profile.aa_address) {
+          setAaAddress((prev) => prev || profile.aa_address || null);
+        }
+
+        // If participant agent already exists, hydrate it early so Step 3 can continue immediately.
+        if (typeof profile.participant_did === "string" && profile.participant_did) {
+          const participantDid = profile.participant_did;
+          setParticipantAgentDid((prev) => prev ?? participantDid);
+
+          if (typeof profile.participant_agent_name === "string") {
+            const participantName = profile.participant_agent_name;
+            setParticipantAgentName((prev) => (prev.trim() ? prev : participantName || ""));
+          }
+          setParticipantEnsName((prev) =>
+            prev ?? (typeof profile.participant_ens_name === "string" ? profile.participant_ens_name : null),
+          );
+          setParticipantAgentAccount((prev) =>
+            prev ?? (typeof profile.participant_agent_account === "string" ? profile.participant_agent_account : null),
+          );
+          setParticipantAgentId((prev) =>
+            prev ?? (typeof profile.participant_agent_id === "string" ? profile.participant_agent_id : null),
+          );
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.warn("[onboarding] Failed to hydrate individual profile for EOA (step 2):", e);
+        }
+      } finally {
+        hydratingStep2Ref.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [step, walletAddress]);
+
+  // Auto-advance onboarding based on what already exists in the individuals record for this EOA.
+  const autoAdvancedEoaRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (step !== 3) {
-      setEnsAvailability({ checking: false, available: null, ensName: null });
+    if (step !== 2) return;
+    if (!walletAddress) return;
+    const eoa = walletAddress.toLowerCase();
+    if (autoAdvancedEoaRef.current === eoa) return;
+
+    const hasNames = !!firstName.trim() || !!lastName.trim();
+    const hasParticipant = !!participantAgentDid;
+
+    // If we already have everything for steps 2-3, jump to org step.
+    if (hasNames && hasParticipant) {
+      autoAdvancedEoaRef.current = eoa;
+      setStep(4);
       return;
     }
 
-    const agentName = normalizedAgentName;
+    // If we already have names, proceed to participant agent step.
+    if (hasNames) {
+      autoAdvancedEoaRef.current = eoa;
+      setStep(3);
+    }
+  }, [step, walletAddress, firstName, lastName, participantAgentDid]);
+
+  // Step 3: if an individuals record already exists for this EOA, hydrate fields and allow continuing.
+  const hydratedIndividualEoaRef = React.useRef<string | null>(null);
+  const hydratingIndividualRef = React.useRef(false);
+  React.useEffect(() => {
+    if (step !== 3) return;
+    if (!walletAddress) return;
+    const eoa = walletAddress.toLowerCase();
+    if (hydratedIndividualEoaRef.current === eoa) return;
+    if (hydratingIndividualRef.current) return;
+
+    let cancelled = false;
+    hydratingIndividualRef.current = true;
+
+    (async () => {
+      try {
+        const profile = await getUserProfile(undefined, eoa);
+        if (cancelled || !profile) return;
+        hydratedIndividualEoaRef.current = eoa;
+        setExistingIndividualProfile(profile);
+
+        setFirstName(typeof profile.first_name === "string" ? profile.first_name : "");
+        setLastName(typeof profile.last_name === "string" ? profile.last_name : "");
+
+        if (typeof profile.participant_agent_name === "string") {
+          setParticipantAgentName(profile.participant_agent_name);
+        }
+        setParticipantEnsName(typeof profile.participant_ens_name === "string" ? profile.participant_ens_name : null);
+        setParticipantAgentAccount(
+          typeof profile.participant_agent_account === "string" ? profile.participant_agent_account : null,
+        );
+        setParticipantAgentId(typeof profile.participant_agent_id === "string" ? profile.participant_agent_id : null);
+        setParticipantAgentDid(typeof profile.participant_did === "string" ? profile.participant_did : null);
+
+        // If we already have an ENS name from the DB, stop any "checking" UI flicker.
+        if (typeof profile.participant_ens_name === "string" && profile.participant_ens_name) {
+          setParticipantEnsAvailability({ checking: false, available: null, ensName: profile.participant_ens_name });
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.warn("[onboarding] Failed to hydrate individual profile for EOA:", e);
+        }
+      } finally {
+        hydratingIndividualRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [step, walletAddress]);
+
+  // Check ENS availability for the participant agent when on step 3.
+  React.useEffect(() => {
+    if (step !== 3) {
+      setParticipantEnsAvailability({ checking: false, available: null, ensName: null });
+      return;
+    }
+
+    // If participant agent is already present (loaded from DB or created now), don't re-check.
+    if (participantAgentDid) {
+      const ens = participantEnsName ?? null;
+      setParticipantEnsAvailability({ checking: false, available: null, ensName: ens });
+      return;
+    }
+
+    const agentName = normalizedParticipantAgentName;
     if (!agentName || !isValidAgentName(agentName)) {
-      setEnsAvailability({ checking: false, available: null, ensName: null });
+      setParticipantEnsAvailability({ checking: false, available: null, ensName: null });
       return;
     }
 
@@ -335,7 +431,7 @@ export default function OnboardingPage() {
         const ensName = `${agentName}.${ensOrgName}.eth`;
         const didEns = `did:ens:${sepolia.id}:${ensName}`;
 
-        setEnsAvailability({ checking: true, available: null, ensName });
+        setParticipantEnsAvailability({ checking: true, available: null, ensName });
 
         const encodedDidEns = encodeURIComponent(didEns);
         const response = await fetch(`/api/names/${encodedDidEns}/is-available`);
@@ -343,7 +439,7 @@ export default function OnboardingPage() {
 
         if (response.ok) {
           const result = await response.json();
-          setEnsAvailability({
+          setParticipantEnsAvailability({
             checking: false,
             available: result.available === true,
             ensName,
@@ -351,18 +447,67 @@ export default function OnboardingPage() {
           return;
         }
 
-        setEnsAvailability({ checking: false, available: null, ensName });
+        setParticipantEnsAvailability({ checking: false, available: null, ensName });
       } catch (error) {
         if (cancelled) return;
-        console.warn("Failed to check ENS availability:", error);
-        setEnsAvailability({ checking: false, available: null, ensName: null });
+        console.warn("Failed to check participant ENS availability:", error);
+        setParticipantEnsAvailability({ checking: false, available: null, ensName: null });
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [step, normalizedAgentName, isValidAgentName]);
+  }, [step, normalizedParticipantAgentName, isValidAgentName]);
+
+  // Check ENS availability for the organization agent when on step 4 and creating new.
+  React.useEffect(() => {
+    if (step !== 4 || orgChoice !== "create") {
+      setOrgEnsAvailability({ checking: false, available: null, ensName: null });
+      return;
+    }
+
+    const agentName = normalizedOrgAgentName;
+    if (!agentName || !isValidAgentName(agentName)) {
+      setOrgEnsAvailability({ checking: false, available: null, ensName: null });
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const ensOrgName = "8004-agent";
+        const ensName = `${agentName}.${ensOrgName}.eth`;
+        const didEns = `did:ens:${sepolia.id}:${ensName}`;
+
+        setOrgEnsAvailability({ checking: true, available: null, ensName });
+
+        const encodedDidEns = encodeURIComponent(didEns);
+        const response = await fetch(`/api/names/${encodedDidEns}/is-available`);
+        if (cancelled) return;
+
+        if (response.ok) {
+          const result = await response.json();
+          setOrgEnsAvailability({
+            checking: false,
+            available: result.available === true,
+            ensName,
+          });
+          return;
+        }
+
+        setOrgEnsAvailability({ checking: false, available: null, ensName });
+      } catch (error) {
+        if (cancelled) return;
+        console.warn("Failed to check organization ENS availability:", error);
+        setOrgEnsAvailability({ checking: false, available: null, ensName: null });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [step, orgChoice, normalizedOrgAgentName, isValidAgentName]);
 
   const { 
     handleStandardConnect, 
@@ -404,15 +549,6 @@ export default function OnboardingPage() {
 
       setWalletAddress(account);
 
-      // Best-effort split of the display name into first/last.
-      const userInfo = await getUserInfo();
-      const resolvedName = userInfo?.name ?? "Unknown user";
-      if (resolvedName && typeof resolvedName === "string") {
-        const parts = resolvedName.split(" ").filter(Boolean);
-        setFirstName(parts[0] ?? "");
-        setLastName(parts.length > 1 ? parts.slice(1).join(" ") : "");
-      }
-
       // Before moving to the individual details step, build a counterfactual
       // AA account client for the person (using a fixed salt) and store its address.
       const provider = (web3auth as any)?.provider as
@@ -445,11 +581,279 @@ export default function OnboardingPage() {
     } finally {
       setIsConnecting(false);
     }
-  }, [web3auth, handleStandardConnect, getUserInfo]);
+  }, [web3auth, handleStandardConnect]);
 
   const handleOrgChange = (field: keyof OrgDetails, value: string) => {
     setOrg((prev) => ({ ...prev, [field]: value }));
   };
+
+  React.useEffect(() => {
+    if (step !== 4 || !userEmail) return;
+    let cancelled = false;
+    setIsLoadingOrganizations(true);
+    (async () => {
+      try {
+        const orgs = await getUserOrganizations(userEmail);
+        if (!cancelled) {
+          setUserOrganizations(Array.isArray(orgs) ? orgs : []);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setUserOrganizations([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingOrganizations(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, userEmail]);
+
+  const runOrgSearch = React.useCallback(async () => {
+    const q = orgSearchQuery.trim();
+    if (!q) {
+      setOrgSearchError("Enter an ENS name, DID, or agent name to search.");
+      return;
+    }
+    setOrgSearchLoading(true);
+    setOrgSearchError(null);
+    try {
+      const res = await fetch("/api/agents/search", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: q,
+          page: 1,
+          pageSize: 10,
+          params: { chains: [sepolia.id] },
+        }),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        throw new Error(json?.message || `Search failed (${res.status})`);
+      }
+      setOrgSearchResults(Array.isArray(json?.agents) ? json.agents : []);
+    } catch (e: any) {
+      setOrgSearchResults([]);
+      setOrgSearchError(e?.message || String(e));
+    } finally {
+      setOrgSearchLoading(false);
+    }
+  }, [orgSearchQuery]);
+
+  const connectToOrgAgent = React.useCallback(
+    async (agent: any) => {
+      if (!walletAddress) {
+        setError("Missing wallet address. Please reconnect and try again.");
+        return;
+      }
+
+      const agentName = String(agent?.agentName || agent?.agent_name || "").trim();
+      const ensName =
+        String(agent?.ensName || agent?.ens_name || "").trim() ||
+        (agentName ? `${agentName}.8004-agent.eth` : "");
+      const agentAccount = String(agent?.agentAccount || agent?.agent_account || "").trim();
+      const chainId = typeof agent?.chainId === "number" ? agent.chainId : sepolia.id;
+
+      if (!agentName || !ensName) {
+        setError("Selected agent is missing required identifiers.");
+        return;
+      }
+
+      const defaultAgent: DefaultOrgAgent = {
+        ensName,
+        agentName,
+        agentAccount,
+        chainId,
+        name: agent?.name || agent?.org_name || undefined,
+        description: undefined,
+        image: undefined,
+        agentUrl: agent?.agentUrl || undefined,
+      };
+
+      try {
+        if (userEmail) {
+          await associateUserWithOrganization(userEmail, {
+            ens_name: ensName,
+            agent_name: agentName,
+            org_name: agent?.name || undefined,
+            org_address: undefined,
+            org_type: undefined,
+            email_domain: emailDomain ?? "",
+            agent_account: agentAccount || undefined,
+            chain_id: chainId,
+            is_primary: false,
+            role: undefined,
+          });
+        } else {
+          await associateUserWithOrganizationByEoa(
+            walletAddress,
+            {
+              ens_name: ensName,
+              agent_name: agentName,
+              org_name: agent?.name || undefined,
+              org_address: undefined,
+              org_type: undefined,
+              email_domain: emailDomain ?? "",
+              agent_account: agentAccount || undefined,
+              chain_id: chainId,
+              is_primary: false,
+              role: undefined,
+            },
+            null,
+          );
+        }
+      } catch (e) {
+        console.warn("[onboarding] Failed to persist org association:", e);
+      }
+
+      setDefaultOrgAgent(defaultAgent, userEmail ?? undefined);
+      setItg(ensName);
+      setStep(6);
+    },
+    [walletAddress, userEmail, setDefaultOrgAgent, emailDomain],
+  );
+
+  const handleCreateParticipantAgent = React.useCallback(async () => {
+    const agentName = normalizedParticipantAgentName;
+    if (!agentName) {
+      setError("Please enter an agent name for yourself.");
+      return;
+    }
+    if (!isValidAgentName(agentName)) {
+      setError("Participant agent name must be 3-63 chars: lowercase letters, numbers, and hyphens only.");
+      return;
+    }
+    if (participantEnsAvailability.checking || participantEnsAvailability.available !== true) {
+      setError("Please choose an available participant agent name first.");
+      return;
+    }
+    if (!web3auth || !(web3auth as any).provider) {
+      setError("Wallet provider is not available. Please complete the social login step first.");
+      return;
+    }
+
+    setIsCreatingParticipant(true);
+    setError(null);
+
+    try {
+      const eip1193Provider =
+        (web3auth as any).provider ??
+        (typeof window !== "undefined" ? (window as any).ethereum : null);
+
+      if (!eip1193Provider) {
+        setError("No EIP-1193 provider available. Please ensure your wallet is connected.");
+        return;
+      }
+
+      const provider = eip1193Provider as {
+        request: (args: { method: string; params?: any[] }) => Promise<any>;
+      };
+
+      const accounts = await provider.request({ method: "eth_accounts" });
+      const account = Array.isArray(accounts) && accounts[0];
+      if (!account || typeof account !== "string") {
+        setError("We could not determine your wallet address. Please disconnect and reconnect, then try again.");
+        return;
+      }
+
+      const agentAccountAddress = await getCounterfactualSmartAccountAddressByAgentName(
+        agentName,
+        account as `0x${string}`,
+        { ethereumProvider: provider as any, chain: sepolia },
+      );
+
+      if (!agentAccountAddress || typeof agentAccountAddress !== "string" || !agentAccountAddress.startsWith("0x")) {
+        setError("Failed to compute account abstraction address for this participant agent. Please retry.");
+        return;
+      }
+
+      const ensOrgName = "8004-agent";
+      const ensName = `${agentName}.${ensOrgName}.eth`;
+      const didEns = `did:ens:${sepolia.id}:${ensName}`;
+
+      try {
+        const availabilityCheck = await fetch(`/api/names/${encodeURIComponent(didEns)}/is-available`, {
+          method: "GET",
+        });
+        if (availabilityCheck.ok) {
+          const availabilityData = await availabilityCheck.json();
+          if (availabilityData.available === false) {
+            setError(`An agent with the name "${agentName}" already exists. Please choose another name.`);
+            return;
+          }
+        }
+      } catch {
+        // ok to continue
+      }
+
+      const agentUrl = `https://${agentName}.8004-agent.io`;
+      const result = await createAgentWithWallet({
+        agentData: {
+          agentName,
+          agentAccount: agentAccountAddress as `0x${string}`,
+          description: "participant",
+          agentUrl,
+        },
+        account: account as `0x${string}`,
+        ethereumProvider: eip1193Provider as any,
+        ensOptions: { enabled: true, orgName: ensOrgName },
+        useAA: true,
+        chainId: sepolia.id,
+      });
+
+      const createdAgentId = (result as any)?.agentId;
+      if (createdAgentId === undefined || createdAgentId === null) {
+        throw new Error("Participant agent creation did not return an agentId");
+      }
+
+      const did8004 = `did:8004:${sepolia.id}:${String(createdAgentId)}`;
+      setParticipantAgentAccount(agentAccountAddress);
+      setParticipantEnsName(ensName);
+      setParticipantAgentDid(did8004);
+      setParticipantAgentId(String(createdAgentId));
+
+      await saveUserProfile({
+        ...(userEmail ? { email: userEmail } : {}),
+        first_name: firstName || null,
+        last_name: lastName || null,
+        phone_number: userPhone || null,
+        social_display_name: typeof user?.name === "string" ? user.name : null,
+        eoa_address: account,
+        aa_address: aaAddress || null,
+        participant_ens_name: ensName,
+        participant_agent_name: agentName,
+        participant_agent_account: agentAccountAddress,
+        participant_agent_id: String(createdAgentId),
+        participant_chain_id: sepolia.id,
+        participant_did: did8004,
+      });
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      if (msg.includes("user rejected") || msg.includes("User denied")) {
+        setError("Transaction was cancelled. Please try again when ready.");
+      } else {
+        setError(`Failed to create participant agent: ${msg}`);
+      }
+    } finally {
+      setIsCreatingParticipant(false);
+    }
+  }, [
+    normalizedParticipantAgentName,
+    isValidAgentName,
+    participantEnsAvailability.checking,
+    participantEnsAvailability.available,
+    userEmail,
+    web3auth,
+    firstName,
+    lastName,
+    aaAddress,
+    userPhone,
+    user?.name,
+  ]);
 
   const handleOrgNext = React.useCallback(async () => {
     if (!org.name || !org.address || !org.type) {
@@ -457,7 +861,7 @@ export default function OnboardingPage() {
       return;
     }
 
-    const candidateName = normalizedAgentName;
+    const candidateName = normalizedOrgAgentName;
     if (!candidateName) {
       setError("Please choose an agent name before continuing.");
       return;
@@ -502,7 +906,7 @@ export default function OnboardingPage() {
       }
 
       setError(null);
-      setStep(4);
+      setStep(6);
     } catch (e) {
       console.error(e);
       setError(
@@ -511,7 +915,7 @@ export default function OnboardingPage() {
     } finally {
       setIsCheckingAvailability(false);
     }
-  }, [org, normalizedAgentName, isValidAgentName]);
+  }, [org, normalizedOrgAgentName, isValidAgentName]);
 
   const handleDisconnectAndReset = React.useCallback(async () => {
     setError(null);
@@ -551,15 +955,7 @@ export default function OnboardingPage() {
   }, [logout, setUser, router, setDefaultOrgAgent]);
 
   const handleCreateItg = React.useCallback(async () => {
-    // Prevent creation if agent already exists
-    if (agentExists) {
-      setError(
-        `An Impace Identity already exists for your individual account. Agent name: ${existingAgentName || "Unknown"}.`
-      );
-      return;
-    }
-
-    const agentName = normalizedAgentName;
+    const agentName = normalizedOrgAgentName;
     if (!agentName) {
       setError("Please enter an agent name.");
       return;
@@ -877,7 +1273,7 @@ export default function OnboardingPage() {
       // For the Impace onboarding UI, treat a successful client-side flow as success
       // and use the human-readable agent name as the Impace identifier.
       setItg(agentName);
-      setStep(5);
+      setStep(6);
     } catch (e) {
       // Error handling is done in the inner try-catch above
       // This outer catch is just for any unexpected errors that weren't caught by inner catch
@@ -897,7 +1293,16 @@ export default function OnboardingPage() {
     } finally {
       setIsCreatingItg(false);
     }
-  }, [normalizedAgentName, isValidAgentName, org.name, org.address, org.type, web3auth, agentExists, existingAgentName, user?.email, setDefaultOrgAgent]);
+  }, [
+    normalizedOrgAgentName,
+    isValidAgentName,
+    org.name,
+    org.address,
+    org.type,
+    web3auth,
+    user?.email,
+    setDefaultOrgAgent,
+  ]);
 
   const goToAppEnvironment = () => {
     router.push("/app");
@@ -912,6 +1317,22 @@ export default function OnboardingPage() {
           onCancel={onCancelOrgSelect}
         />
       )}
+      {showOrgConnectSelector && userOrganizations.length > 0 && (
+        <OrgAgentSelector
+          organizations={userOrganizations}
+          onSelect={(agent) => {
+            setShowOrgConnectSelector(false);
+            if (user?.email) {
+              setDefaultOrgAgent(agent, user.email);
+            } else {
+              setDefaultOrgAgent(agent);
+            }
+            setItg(agent.ensName);
+            setStep(6);
+          }}
+          onCancel={() => setShowOrgConnectSelector(false)}
+        />
+      )}
     <main
       style={{
         padding: "3rem 2rem",
@@ -922,11 +1343,10 @@ export default function OnboardingPage() {
     >
       <header style={{ marginBottom: "2rem" }}>
         <h1 style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>
-          Impact NGO Onboarding
+          Impact Onboarding
         </h1>
         <p style={{ maxWidth: "40rem", lineHeight: 1.6 }}>
-          Follow a few simple steps to register your NGO, create an
-          NGO Organization Identity, and then continue into the application environment.
+          Follow a few simple steps to register yourself, your Organization, and then continue into the application environment.
         </p>
       </header>
 
@@ -937,7 +1357,7 @@ export default function OnboardingPage() {
           color: "#4b5563"
         }}
       >
-        <strong>Step {step} of 5</strong>
+        <strong>Step {step} of 6</strong>
       </section>
 
       {error && (
@@ -992,7 +1412,7 @@ export default function OnboardingPage() {
                 opacity: !web3auth || isConnecting ? 0.7 : 1
               }}
             >
-              {isConnecting ? "Connecting…" : "Connect with social login"}
+              {isConnecting ? "Connecting…" : "Connect with phone number or social login"}
             </button>
           )}
         </section>
@@ -1013,9 +1433,15 @@ export default function OnboardingPage() {
 
           {user && (
             <div style={{ marginBottom: "1.25rem", lineHeight: 1.5 }}>
-              <p>
-                Email: <strong>{user.email}</strong>
-              </p>
+              {userEmail ? (
+                <p>
+                  Email: <strong>{userEmail}</strong>
+                </p>
+              ) : userPhone ? (
+                <p>
+                  Phone: <strong>{userPhone}</strong>
+                </p>
+              ) : null}
               {walletAddress && (
                 <div
                   style={{
@@ -1052,6 +1478,34 @@ export default function OnboardingPage() {
                   </p>
                 </div>
               )}
+            </div>
+          )}
+
+          {walletAddress && existingIndividualProfile && (
+            <div
+              style={{
+                marginBottom: "1rem",
+                padding: "0.75rem",
+                borderRadius: "0.5rem",
+                border: "1px solid #e2e8f0",
+                backgroundColor: "#f8fafc",
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
+                Existing profile (by EOA)
+              </div>
+              <pre
+                style={{
+                  margin: 0,
+                  fontSize: "0.75rem",
+                  overflowX: "auto",
+                  whiteSpace: "pre",
+                  fontFamily:
+                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
+                }}
+              >
+                {JSON.stringify(existingIndividualProfile, null, 2)}
+              </pre>
             </div>
           )}
 
@@ -1134,11 +1588,512 @@ export default function OnboardingPage() {
             padding: "1.75rem 1.5rem",
             borderRadius: "0.75rem",
             border: "1px solid rgba(148, 163, 184, 0.6)",
+            backgroundColor: "white",
+          }}
+        >
+          <h2 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>
+            3. Create your participant agent
+          </h2>
+          <p style={{ marginBottom: "1rem", lineHeight: 1.5 }}>
+            This creates your personal (participant) agent identity and saves it to your profile.
+          </p>
+
+          {user && (
+            <div style={{ marginBottom: "1rem", lineHeight: 1.5 }}>
+              {userEmail ? (
+                <p>
+                  Email: <strong>{userEmail}</strong>
+                </p>
+              ) : userPhone ? (
+                <p>
+                  Phone: <strong>{userPhone}</strong>
+                </p>
+              ) : null}
+              {participantEnsAvailability.ensName && (
+                <div style={{ marginTop: "0.75rem" }}>
+                  <strong style={{ color: "#1e40af" }}>ENS Domain:</strong>{" "}
+                  <span
+                    style={{
+                      fontFamily:
+                        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
+                      color: "#1e3a8a",
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    {participantEnsAvailability.ensName}
+                  </span>
+                  {participantEnsAvailability.checking ? (
+                    <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "0.25rem" }}>
+                      Checking availability...
+                    </div>
+                  ) : participantEnsAvailability.available !== null ? (
+                    <div
+                      style={{
+                        fontSize: "0.85rem",
+                        color: participantEnsAvailability.available ? "#16a34a" : "#dc2626",
+                        fontWeight: 500,
+                        marginTop: "0.25rem",
+                      }}
+                    >
+                      {participantEnsAvailability.available
+                        ? "✓ Available - This ENS name is available for registration"
+                        : "✗ Not Available - This ENS name is already taken"}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "0.25rem" }}>
+                      Unable to check availability
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {walletAddress && existingIndividualProfile && (
+            <div
+              style={{
+                marginBottom: "1rem",
+                padding: "0.75rem",
+                borderRadius: "0.5rem",
+                border: "1px solid #e2e8f0",
+                backgroundColor: "#f8fafc",
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
+                Existing profile (by EOA)
+              </div>
+              <pre
+                style={{
+                  margin: 0,
+                  fontSize: "0.75rem",
+                  overflowX: "auto",
+                  whiteSpace: "pre",
+                  fontFamily:
+                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
+                }}
+              >
+                {JSON.stringify(existingIndividualProfile, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          <div
+            style={{
+              padding: "1rem",
+              marginBottom: "1rem",
+              borderRadius: "0.5rem",
+              backgroundColor: "#f8fafc",
+              border: "1px solid #e2e8f0",
+            }}
+          >
+            <div style={{ marginBottom: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>
+              Participant agent name
+            </div>
+            <input
+              type="text"
+              value={participantAgentName}
+              onChange={(e) => setParticipantAgentName(e.target.value)}
+              placeholder="e.g. alice"
+              style={{
+                width: "100%",
+                padding: "0.5rem 0.75rem",
+                borderRadius: "0.5rem",
+                border: "1px solid #cbd5f5",
+                fontSize: "0.9rem",
+              }}
+            />
+            <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#64748b" }}>
+              Must be 3-63 chars: lowercase letters, numbers, hyphens.
+            </div>
+          </div>
+
+          {participantAgentDid && (
+            <div
+              style={{
+                padding: "1rem",
+                marginBottom: "1rem",
+                borderRadius: "0.5rem",
+                backgroundColor: "#f0fdf4",
+                border: "1px solid #86efac",
+                lineHeight: 1.6,
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>Participant agent created</div>
+              <div style={{ fontSize: "0.85rem", color: "#14532d" }}>
+                <div>
+                  <strong>DID:</strong> {participantAgentDid}
+                </div>
+                {participantEnsName && (
+                  <div>
+                    <strong>ENS:</strong> {participantEnsName}
+                  </div>
+                )}
+                {participantAgentAccount && (
+                  <div>
+                    <strong>Agent AA:</strong> {participantAgentAccount}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginTop: "1.5rem",
+              gap: "0.75rem",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setStep(2)}
+              style={{
+                padding: "0.5rem 1rem",
+                borderRadius: "9999px",
+                border: "1px solid #cbd5f5",
+                backgroundColor: "white",
+                cursor: "pointer",
+              }}
+            >
+              Back
+            </button>
+            <div style={{ display: "flex", gap: "0.75rem" }}>
+              {!participantAgentDid &&
+                !participantEnsAvailability.checking &&
+                participantEnsAvailability.available === true &&
+                isValidAgentName(normalizedParticipantAgentName) && (
+                  <button
+                    type="button"
+                    onClick={handleCreateParticipantAgent}
+                    disabled={isCreatingParticipant}
+                    style={{
+                      padding: "0.5rem 1.25rem",
+                      borderRadius: "9999px",
+                      border: "1px solid #cbd5f5",
+                      backgroundColor: "white",
+                      fontWeight: 600,
+                      cursor: isCreatingParticipant ? "not-allowed" : "pointer",
+                      opacity: isCreatingParticipant ? 0.7 : 1,
+                    }}
+                  >
+                    {isCreatingParticipant ? "Creating participant agent…" : "Create participant agent"}
+                  </button>
+                )}
+              <button
+                type="button"
+                onClick={() => setStep(4)}
+                disabled={!participantAgentDid}
+                style={{
+                  padding: "0.5rem 1.25rem",
+                  borderRadius: "9999px",
+                  border: "none",
+                  backgroundColor: participantAgentDid ? "#2563eb" : "#9ca3af",
+                  color: "white",
+                  fontWeight: 600,
+                  cursor: participantAgentDid ? "pointer" : "not-allowed",
+                  opacity: participantAgentDid ? 1 : 0.7,
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {step === 4 && (
+        <section
+          style={{
+            padding: "1.75rem 1.5rem",
+            borderRadius: "0.75rem",
+            border: "1px solid rgba(148, 163, 184, 0.6)",
+            backgroundColor: "white",
+            marginBottom: orgChoice === "create" ? "1rem" : 0,
+          }}
+        >
+          <h2 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>4. Organization</h2>
+          <p style={{ marginBottom: "1rem", lineHeight: 1.5 }}>
+            Choose whether to connect to an existing organization agent, skip organization connection, or create a new
+            organization agent.
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1rem" }}>
+            <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="orgChoice"
+                checked={orgChoice === "connect"}
+                onChange={() => setOrgChoice("connect")}
+              />
+              <span>Connect to an existing organization agent</span>
+            </label>
+            <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="orgChoice"
+                checked={orgChoice === "skip"}
+                onChange={() => setOrgChoice("skip")}
+              />
+              <span>Don&apos;t connect to any organization</span>
+            </label>
+            <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="orgChoice"
+                checked={orgChoice === "create"}
+                onChange={() => setOrgChoice("create")}
+              />
+              <span>Create a new organization agent</span>
+            </label>
+          </div>
+
+          {orgChoice === "connect" && (
+            <div
+              style={{
+                padding: "1rem",
+                borderRadius: "0.5rem",
+                backgroundColor: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                marginBottom: "1rem",
+              }}
+            >
+              {userEmail && userOrganizations.length > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "0.75rem",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  <div style={{ fontSize: "0.9rem", color: "#64748b" }}>
+                    {isLoadingOrganizations ? "Loading your organizations…" : "Select from your organizations"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowOrgConnectSelector(true)}
+                    disabled={isLoadingOrganizations}
+                    style={{
+                      padding: "0.5rem 1rem",
+                      borderRadius: "9999px",
+                      border: "none",
+                      backgroundColor: isLoadingOrganizations ? "#9ca3af" : "#2563eb",
+                      color: "white",
+                      fontWeight: 600,
+                      cursor: isLoadingOrganizations ? "not-allowed" : "pointer",
+                      opacity: isLoadingOrganizations ? 0.7 : 1,
+                    }}
+                  >
+                    Select from my orgs
+                  </button>
+                </div>
+              )}
+
+              <div style={{ marginTop: "1rem" }}>
+                <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>Search organization agents</div>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <input
+                    type="text"
+                    value={orgSearchQuery}
+                    onChange={(e) => setOrgSearchQuery(e.target.value)}
+                    placeholder="e.g. myorg.8004-agent.eth or jane-smith"
+                    style={{
+                      flex: 1,
+                      padding: "0.5rem 0.75rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid #cbd5f5",
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={runOrgSearch}
+                    disabled={orgSearchLoading}
+                    style={{
+                      padding: "0.5rem 1rem",
+                      borderRadius: "0.5rem",
+                      border: "none",
+                      backgroundColor: "#2563eb",
+                      color: "white",
+                      fontWeight: 600,
+                      cursor: orgSearchLoading ? "not-allowed" : "pointer",
+                      opacity: orgSearchLoading ? 0.7 : 1,
+                    }}
+                  >
+                    {orgSearchLoading ? "Searching…" : "Search"}
+                  </button>
+                </div>
+                {orgSearchError && (
+                  <div style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "#b91c1c" }}>
+                    {orgSearchError}
+                  </div>
+                )}
+                {orgSearchResults.length > 0 && (
+                  <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    {orgSearchResults.map((a, idx) => {
+                      const label =
+                        a?.ensName || a?.agentName || a?.name || a?.did || `Result ${idx + 1}`;
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: "0.75rem",
+                            borderRadius: "0.5rem",
+                            border: "1px solid #e2e8f0",
+                            backgroundColor: "white",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "0.75rem",
+                          }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>{label}</div>
+                            <div style={{ fontSize: "0.85rem", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {a?.did || a?.uaid || ""}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void connectToOrgAgent(a)}
+                            style={{
+                              padding: "0.5rem 0.75rem",
+                              borderRadius: "0.5rem",
+                              border: "none",
+                              backgroundColor: "#16a34a",
+                              color: "white",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Use this agent
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {orgChoice === "skip" && (
+            <div
+              style={{
+                padding: "1rem",
+                borderRadius: "0.5rem",
+                backgroundColor: "#fff7ed",
+                border: "1px solid #fdba74",
+                marginBottom: "1rem",
+                lineHeight: 1.6,
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>No organization connection</div>
+              <div style={{ fontSize: "0.9rem", color: "#7c2d12" }}>
+                You can continue without linking to an organization agent.
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1.25rem" }}>
+            <button
+              type="button"
+              onClick={() => setStep(3)}
+              style={{
+                padding: "0.5rem 1rem",
+                borderRadius: "9999px",
+                border: "1px solid #cbd5f5",
+                backgroundColor: "white",
+                cursor: "pointer",
+              }}
+            >
+              Back
+            </button>
+
+            {orgChoice === "skip" ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    if (typeof window !== "undefined") {
+                      localStorage.removeItem("itg_default_org_agent");
+                      Object.keys(localStorage)
+                        .filter((key) => key.startsWith("itg_agent_details_"))
+                        .forEach((key) => localStorage.removeItem(key));
+                    }
+                  } catch (e) {
+                    void e;
+                  }
+                  setDefaultOrgAgent(null);
+                  setItg(null);
+                  setStep(6);
+                }}
+                style={{
+                  padding: "0.5rem 1.25rem",
+                  borderRadius: "9999px",
+                  border: "none",
+                  backgroundColor: "#2563eb",
+                  color: "white",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Continue
+              </button>
+            ) : orgChoice === "connect" ? (
+              <button
+                type="button"
+                onClick={() => setShowOrgConnectSelector(true)}
+                disabled={isLoadingOrganizations || userOrganizations.length === 0}
+                style={{
+                  padding: "0.5rem 1.25rem",
+                  borderRadius: "9999px",
+                  border: "none",
+                  backgroundColor:
+                    isLoadingOrganizations || userOrganizations.length === 0 ? "#9ca3af" : "#2563eb",
+                  color: "white",
+                  fontWeight: 600,
+                  cursor:
+                    isLoadingOrganizations || userOrganizations.length === 0 ? "not-allowed" : "pointer",
+                  opacity: isLoadingOrganizations || userOrganizations.length === 0 ? 0.7 : 1,
+                }}
+              >
+                Select agent
+              </button>
+            ) : orgChoice === "create" ? (
+              <button
+                type="button"
+                onClick={() => setStep(5)}
+                style={{
+                  padding: "0.5rem 1.25rem",
+                  borderRadius: "9999px",
+                  border: "none",
+                  backgroundColor: "#2563eb",
+                  color: "white",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Continue
+              </button>
+            ) : null}
+          </div>
+        </section>
+      )}
+
+      {step === 5 && orgChoice === "create" && (
+        <section
+          style={{
+            padding: "1.75rem 1.5rem",
+            borderRadius: "0.75rem",
+            border: "1px solid rgba(148, 163, 184, 0.6)",
             backgroundColor: "white"
           }}
         >
           <h2 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>
-            3. Organization details
+            5. Organization details
           </h2>
 
           {user && (
@@ -1150,7 +2105,7 @@ export default function OnboardingPage() {
                 </strong>
                 .
               </p>
-              {ensAvailability.ensName && (
+              {orgEnsAvailability.ensName && (
                 <div style={{ marginTop: "0.75rem" }}>
                   <strong style={{ color: "#1e40af" }}>ENS Domain:</strong>{" "}
                   <span
@@ -1161,22 +2116,22 @@ export default function OnboardingPage() {
                       fontSize: "0.9rem"
                   }}
                 >
-                    {ensAvailability.ensName}
+                    {orgEnsAvailability.ensName}
                   </span>
-                  {ensAvailability.checking ? (
+                  {orgEnsAvailability.checking ? (
                     <div style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "0.25rem" }}>
                       Checking availability...
                     </div>
-                  ) : ensAvailability.available !== null ? (
+                  ) : orgEnsAvailability.available !== null ? (
                     <div
                       style={{
                         fontSize: "0.85rem",
-                        color: ensAvailability.available ? "#16a34a" : "#dc2626",
+                        color: orgEnsAvailability.available ? "#16a34a" : "#dc2626",
                         fontWeight: 500,
                         marginTop: "0.25rem"
                       }}
                     >
-                      {ensAvailability.available
+                      {orgEnsAvailability.available
                         ? "✓ Available - This ENS name is available for registration"
                         : "✗ Not Available - This ENS name is already taken"}
                     </div>
@@ -1279,11 +2234,12 @@ export default function OnboardingPage() {
                 }}
               >
                 <option value="">Select a type…</option>
-                <option value="operationalRelief">
-                  Operational Relief Organization
+                <option value="organization">
+                  Organization
                 </option>
-                <option value="resource">Resource Organization</option>
-                <option value="alliance">Alliance Organization</option>
+                <option value="coalition">Coalition</option>
+                <option value="contributor">Contributor</option>
+                
               </select>
             </label>
           </div>
@@ -1299,7 +2255,7 @@ export default function OnboardingPage() {
               type="button"
               onClick={(e) => {
                 e.preventDefault();
-                setStep(2);
+                setStep(4);
               }}
               style={{
                 padding: "0.5rem 1rem",
@@ -1332,7 +2288,7 @@ export default function OnboardingPage() {
         </section>
       )}
 
-      {step === 4 && (
+      {step === 6 && orgChoice === "create" && !itg && (
         <section
           style={{
             padding: "1.75rem 1.5rem",
@@ -1342,12 +2298,12 @@ export default function OnboardingPage() {
           }}
         >
           <h2 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>
-            4. Organization summary
+            6. Organization summary
           </h2>
           
           {(() => {
             // Calculate the ENS name that will be used
-            const agentName = normalizedAgentName;
+            const agentName = normalizedOrgAgentName;
             const ensOrgName = "8004-agent";
             const ensName = `${agentName}.${ensOrgName}.eth`;
             
@@ -1391,11 +2347,11 @@ export default function OnboardingPage() {
                   <div style={{ marginTop: "0.5rem" }}>
                     <strong style={{ color: "#1e40af" }}>Organization Type:</strong>{" "}
                     <span>
-              {org.type === "operationalRelief"
+              {org.type === "organization"
                 ? "Operational Relief Organization"
-                : org.type === "resource"
-                  ? "Resource Organization"
-                  : "Alliance Organization"}
+                : org.type === "contributor"
+                  ? "Organization"
+                  : "Coalition"}
                     </span>
                   </div>
                 )}
@@ -1412,43 +2368,12 @@ export default function OnboardingPage() {
             Is it OK to create an Impace Organization Identity for this organization now?
           </p>
 
-          {isCheckingAgent && (
-            <div
-              style={{
-                marginBottom: "1rem",
-                padding: "0.75rem 1rem",
-                borderRadius: "0.5rem",
-                backgroundColor: "#f3f4f6",
-                color: "#4b5563",
-                fontSize: "0.9rem"
-              }}
-            >
-              Checking for existing agent...
-            </div>
-          )}
-
-          {agentExists && existingAgentName && (
-            <div
-              style={{
-                marginBottom: "1rem",
-                padding: "0.75rem 1rem",
-                borderRadius: "0.5rem",
-                backgroundColor: "#fef3c7",
-                border: "1px solid #fbbf24",
-                color: "#92400e"
-              }}
-            >
-              <strong>Agent already exists:</strong> An Impace Identity already exists for your individual account. 
-              The agent name is <strong>{existingAgentName}</strong>. You cannot create a second agent.
-            </div>
-          )}
-
           <div style={{ display: "flex", gap: "0.75rem" }}>
             <button
               type="button"
               onClick={(e) => {
                 e.preventDefault();
-                setStep(3);
+                setStep(5);
               }}
               style={{
                 padding: "0.5rem 1rem",
@@ -1463,23 +2388,19 @@ export default function OnboardingPage() {
             <button
               type="button"
               onClick={handleCreateItg}
-              disabled={isCreatingItg || agentExists || isCheckingAgent}
+              disabled={isCreatingItg}
               style={{
                 padding: "0.5rem 1.25rem",
                 borderRadius: "9999px",
                 border: "none",
-                backgroundColor: agentExists || isCheckingAgent ? "#9ca3af" : "#16a34a",
+                backgroundColor: "#16a34a",
                 color: "white",
                 fontWeight: 600,
-                cursor: agentExists || isCreatingItg || isCheckingAgent ? "not-allowed" : "pointer",
-                opacity: agentExists || isCreatingItg || isCheckingAgent ? 0.7 : 1
+                cursor: isCreatingItg ? "not-allowed" : "pointer",
+                opacity: isCreatingItg ? 0.7 : 1
               }}
             >
-              {isCreatingItg 
-                ? "Creating Impace Organization Identity…" 
-                : isCheckingAgent 
-                  ? "Checking for existing agent…" 
-                  : "Yes, create Impace Organization Identity"}
+              {isCreatingItg ? "Creating Impace Organization Identity…" : "Yes, create Impace Organization Identity"}
             </button>
           </div>
 
@@ -1514,7 +2435,7 @@ export default function OnboardingPage() {
         </section>
       )}
 
-      {step === 5 && itg && (
+      {step === 6 && (orgChoice !== "create" || Boolean(itg)) && (
         <section
           style={{
             padding: "1.75rem 1.5rem",
@@ -1525,30 +2446,54 @@ export default function OnboardingPage() {
           }}
         >
           <h2 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>
-            5. Your Impace Organization Identity
+            6. Finish
           </h2>
 
           <p style={{ marginBottom: "1rem", lineHeight: 1.5 }}>
-            The Impace Organization Identity for{" "}
-            <strong>{org.name || "your organization"}</strong> has been
-            created.
+            Your participant agent has been created and saved to your profile.
           </p>
 
-          <div
-            style={{
-              padding: "0.85rem 1rem",
-              borderRadius: "0.5rem",
-              backgroundColor: "white",
-              border: "1px dashed rgba(34, 197, 94, 0.7)",
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace"
-            }}
-          >
-            {itg}
-          </div>
+          {participantAgentDid && (
+            <div
+              style={{
+                padding: "0.85rem 1rem",
+                borderRadius: "0.5rem",
+                backgroundColor: "white",
+                border: "1px dashed rgba(34, 197, 94, 0.7)",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+                marginBottom: "1rem",
+              }}
+            >
+              {participantAgentDid}
+            </div>
+          )}
+
+          {itg ? (
+            <>
+              <p style={{ marginBottom: "0.75rem", lineHeight: 1.5 }}>
+                Organization agent connected/created:
+              </p>
+              <div
+                style={{
+                  padding: "0.85rem 1rem",
+                  borderRadius: "0.5rem",
+                  backgroundColor: "white",
+                  border: "1px dashed rgba(34, 197, 94, 0.7)",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+                }}
+              >
+                {itg}
+              </div>
+            </>
+          ) : (
+            <p style={{ marginBottom: "1rem", lineHeight: 1.5, color: "#14532d" }}>
+              No organization agent connected.
+            </p>
+          )}
 
           <p style={{ marginTop: "1.25rem", marginBottom: "1.25rem" }}>
             Next, you&apos;ll move into the application environment where we
-            manage operations, resources, and alliances using this Impace.
+            manage operations, resources, and coalition using this Impace.
           </p>
 
           <button

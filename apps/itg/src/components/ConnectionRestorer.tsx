@@ -29,11 +29,13 @@ export function ConnectionRestorer() {
           
           if (userInfo) {
             const resolvedName = userInfo?.name ?? "Unknown user";
-            const resolvedEmail = userInfo?.email ?? "unknown@example.com";
+            const rawEmail = typeof userInfo?.email === "string" ? userInfo.email.trim() : "";
+            const resolvedEmail =
+              rawEmail && rawEmail.toLowerCase() !== "unknown@example.com" && rawEmail.includes("@") ? rawEmail : null;
             
             setUser({
               name: resolvedName,
-              email: resolvedEmail
+              ...(resolvedEmail ? { email: resolvedEmail } : {}),
             });
           } else {
             // Web3Auth says connected but can't get user info - clear state

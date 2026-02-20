@@ -6,8 +6,10 @@ import { getAgenticTrustClient } from '@agentic-trust/core/server';
 function normalizeDiscoveryUrl(value: unknown) {
   const raw = String(value || '').trim().replace(/\/+$/, '');
   if (!raw) return null;
+  // Allow explicit endpoints.
   if (/\/graphql-kb$/i.test(raw)) return raw;
-  if (/\/graphql$/i.test(raw)) return raw.replace(/\/graphql$/i, '/graphql-kb');
+  if (/\/graphql$/i.test(raw)) return raw;
+  // Default to KB endpoint for base URLs.
   return `${raw}/graphql-kb`;
 }
 
@@ -73,7 +75,19 @@ function buildKbWhereInput(params: any, query: any) {
   if (agentIdRaw) where.agentIdentifierMatch = agentIdRaw;
 
   const qRaw = typeof query === 'string' ? query.trim() : '';
-  if (qRaw) where.agentIdentifierMatch = qRaw;
+  if (qRaw) {
+    // If query looks like a concrete identifier, use identifier match.
+    if (/^(uaid:|did:)/i.test(qRaw) || /^0x[a-fA-F0-9]{40}$/.test(qRaw)) {
+      where.agentIdentifierMatch = qRaw;
+    } else if (/\.eth$/i.test(qRaw)) {
+      // Accept ENS names by searching the label portion (agentName is typically the label).
+      const label = qRaw.split('.')[0] || qRaw;
+      where.agentName_contains = label;
+    } else {
+      // Default: fuzzy name search.
+      where.agentName_contains = qRaw;
+    }
+  }
 
   const minFeedbackCount = p.minFeedbackCount;
   if (typeof minFeedbackCount === 'number' && Number.isFinite(minFeedbackCount) && minFeedbackCount > 0) {

@@ -188,6 +188,10 @@ export default function DashboardPage() {
   // Validation request functionality moved to agents page
   const [loadingProgress, setLoadingProgress] = React.useState(0);
 
+  // Prevent re-hydrating agentInfo (and re-triggering RPC-heavy effects) unless the agent actually changes.
+  const hydratedAgentKeyRef = React.useRef<string | null>(null);
+  const fetchedDbKeyRef = React.useRef<string | null>(null);
+
   const resolvedAgentDisplayName = React.useMemo(() => {
     return (
       agentInfo?.name ||
@@ -283,13 +287,6 @@ export default function DashboardPage() {
         return;
       }
 
-      // Reset agent info when defaultOrgAgent changes (e.g., after selecting a new agent)
-      if (isMounted) {
-        setAgentInfo(null);
-        setLoading(true);
-        setError(null);
-      }
-
       console.info(" ********** default org agent: ", defaultOrgAgent);
       const agentToUse = defaultOrgAgent;
       console.log('[DashboardPage] Checking agentToUse:', {
@@ -323,6 +320,17 @@ export default function DashboardPage() {
           return;
         }
         
+        const nextKey =
+          agentToUse.did || agentToUse.ensName || agentToUse.agentAccount || null;
+        if (nextKey && hydratedAgentKeyRef.current === nextKey) {
+          if (isMounted) {
+            setError(null);
+            setLoading(false);
+          }
+          return;
+        }
+        hydratedAgentKeyRef.current = nextKey;
+
         console.log("[DashboardPage] Setting agentInfo from agentToUse:", agentToUse);
         console.log("[DashboardPage] agentToUse.did:", agentToUse.did);
         
@@ -364,9 +372,8 @@ export default function DashboardPage() {
         console.log("[DashboardPage] Setting agentInfo state:", finalAgentInfo);
         setAgentInfo(finalAgentInfo);
         setError(null);
-        // Keep loading true while we fetch database info
-        setLoading(true);
-        console.log("[DashboardPage] Set loading=true, fetching additional data...");
+        // Show the dashboard immediately; load extra data in background effects.
+        setLoading(false);
         
         // Get wallet address for display (wait for Web3Auth to be ready)
         console.log("[DashboardPage] Checking Web3Auth for wallet address:", {
@@ -398,54 +405,6 @@ export default function DashboardPage() {
         } else {
           console.log("[DashboardPage] Web3Auth not ready for wallet address fetch");
         }
-
-        // Fetch user profile and organization data from database
-        // If user email is not available yet (e.g., on refresh), we'll fetch it when it becomes available
-        console.log("[DashboardPage] Checking for user email to fetch database info:", {
-          hasUser: !!user,
-          userEmail: user?.email
-        });
-        if (user?.email) {
-          try {
-            console.log("[DashboardPage] Fetching user profile for:", user.email);
-            const profile = await getUserProfile(user.email);
-            console.log("[DashboardPage] User profile result:", profile);
-            if (profile && isMounted) {
-              console.log("[DashboardPage] Setting userProfile state");
-              setUserProfile(profile);
-            } else {
-              console.log("[DashboardPage] No profile found or component unmounted");
-            }
-
-            console.log("[DashboardPage] Fetching user organizations for:", user.email);
-            const orgs = await getUserOrganizations(user.email);
-            console.log("[DashboardPage] User organizations result:", orgs);
-            const primaryOrg = orgs.find(org => org.is_primary) || orgs[0];
-            console.log("[DashboardPage] Primary organization:", primaryOrg);
-            if (primaryOrg && isMounted) {
-              console.log("[DashboardPage] Setting organizationData and orgEditData");
-              setOrganizationData(primaryOrg);
-              setOrgEditData({
-                org_name: primaryOrg.org_name || "",
-                org_address: primaryOrg.org_address || "",
-                org_type: primaryOrg.org_type || ""
-              });
-            }
-          } catch (err) {
-            console.warn("[DashboardPage] Failed to fetch database info:", err);
-          }
-        } else {
-          console.log("[DashboardPage] No user email available, skipping database fetch (will retry when email available)");
-        }
-
-        // Now we can set loading to false after all data is fetched
-        // Even if user email is not available yet, we can still show the agent info
-        if (isMounted) {
-          console.log("[DashboardPage] All data fetched, setting loading=false");
-          setLoading(false);
-        } else {
-          console.log("[DashboardPage] Component unmounted, not updating loading state");
-        }
         return;
       }
 
@@ -469,7 +428,15 @@ export default function DashboardPage() {
         clearTimeout(timeoutId);
       }
     };
-  }, [web3auth, isWeb3AuthInitializing, defaultOrgAgent, isLoadingAgent, user?.email]);
+  }, [
+    web3auth?.provider,
+    isWeb3AuthInitializing,
+    defaultOrgAgent?.did,
+    defaultOrgAgent?.ensName,
+    defaultOrgAgent?.agentAccount,
+    isLoadingAgent,
+    user?.email,
+  ]);
 
   // Fetch database info when user email becomes available (e.g., after refresh)
   React.useEffect(() => {
@@ -479,7 +446,7 @@ export default function DashboardPage() {
       loading,
       hasAgentInfo: !!agentInfo
     });
-    if (!user?.email || !defaultOrgAgent || loading || !agentInfo) {
+    if (!user?.email || loading || !agentInfo) {
       console.log("[DashboardPage] Secondary useEffect: Conditions not met, skipping");
       return;
     }
@@ -489,6 +456,14 @@ export default function DashboardPage() {
       console.log("[DashboardPage] Secondary useEffect: No userEmail, skipping");
       return;
     }
+
+    const agentKey =
+      agentInfo?.did || agentInfo?.ensName || agentInfo?.agentAccount || null;
+    const fetchKey = agentKey ? `${userEmail}|${agentKey}` : null;
+    if (fetchKey && fetchedDbKeyRef.current === fetchKey) {
+      return;
+    }
+    fetchedDbKeyRef.current = fetchKey;
 
     async function fetchDatabaseInfo() {
         console.log("[DashboardPage] Secondary useEffect: fetchDatabaseInfo() called for:", userEmail);
@@ -521,7 +496,7 @@ export default function DashboardPage() {
     }
 
     void fetchDatabaseInfo();
-  }, [user?.email, defaultOrgAgent, loading, agentInfo]);
+  }, [user?.email, loading, agentInfo?.did, agentInfo?.ensName, agentInfo?.agentAccount]);
 
   // Fetch feedback data when modal opens
   React.useEffect(() => {
@@ -1623,7 +1598,7 @@ export default function DashboardPage() {
               value={orgEditData.org_type}
               onChange={(e) => setOrgEditData({ ...orgEditData, org_type: e.target.value })}
               margin="normal"
-              placeholder="e.g., Alliance Organization, Non-Profit, etc."
+              placeholder="e.g., Coalition Organization, Non-Profit, etc."
             />
           </Box>
         </DialogContent>

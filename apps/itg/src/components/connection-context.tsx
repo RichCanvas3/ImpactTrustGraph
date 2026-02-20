@@ -4,7 +4,7 @@ import * as React from "react";
 
 export interface ConnectionUser {
   name: string;
-  email: string;
+  email?: string | null;
 }
 
 interface ConnectionContextValue {

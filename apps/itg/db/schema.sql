@@ -3,13 +3,21 @@
 -- Individuals table: stores user profile information
 CREATE TABLE IF NOT EXISTS individuals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  email TEXT NOT NULL UNIQUE,
+  email TEXT UNIQUE,
   first_name TEXT,
   last_name TEXT,
+  phone_number TEXT,
+  social_display_name TEXT,
   social_account_id TEXT, -- Web3Auth social account identifier
   social_account_type TEXT, -- e.g., 'google', 'facebook', 'twitter', etc.
   eoa_address TEXT, -- Externally Owned Account address (0x...)
   aa_address TEXT, -- Account Abstraction address (0x...)
+  participant_ens_name TEXT, -- e.g., 'alice.8004-agent.eth'
+  participant_agent_name TEXT, -- e.g., 'alice'
+  participant_agent_account TEXT, -- Participant agent AA (0x...)
+  participant_agent_id TEXT, -- ERC-8004 agentId as string
+  participant_chain_id INTEGER, -- chain for participant agent (default sepolia)
+  participant_did TEXT, -- did:8004:chainId:agentId
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
@@ -21,7 +29,7 @@ CREATE TABLE IF NOT EXISTS organizations (
   agent_name TEXT NOT NULL, -- e.g., 'richcanvas-itg'
   org_name TEXT, -- Display name of the organization
   org_address TEXT, -- Physical address of the organization
-  org_type TEXT, -- Type: 'operationalRelief', 'resource', 'alliance'
+  org_type TEXT, -- Type: 'organization', 'coalition', 'contributor'
   email_domain TEXT NOT NULL, -- e.g., 'richcanvas.io'
   agent_account TEXT, -- Agent's account address (0x...)
   chain_id INTEGER NOT NULL DEFAULT 11155111, -- Sepolia by default

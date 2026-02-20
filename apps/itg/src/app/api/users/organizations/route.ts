@@ -5,8 +5,8 @@ import type { D1Database } from '../../../../lib/db';
 import { getD1Database } from '../../../../lib/d1-wrapper';
 
 /**
- * GET /api/users/organizations?email=...
- * POST /api/users/organizations - Associate user with an organization
+ * GET /api/users/organizations?email=... or ?eoa=...
+ * POST /api/users/organizations - Associate user with an organization (by email or EOA)
  */
 async function getDB(): Promise<D1Database | null> {
   // Use the D1 wrapper which handles both native binding and Wrangler CLI fallback
@@ -18,10 +18,11 @@ export async function GET(request: NextRequest) {
     console.log('[users/organizations] GET request received');
     const searchParams = request.nextUrl.searchParams;
     const email = searchParams.get('email');
+    const eoa = searchParams.get('eoa');
 
-    if (!email) {
+    if (!email && !eoa) {
       return NextResponse.json(
-        { error: 'Email parameter is required' },
+        { error: 'Either email or eoa parameter is required' },
         { status: 400 }
       );
     }
@@ -48,10 +49,17 @@ export async function GET(request: NextRequest) {
     }
     console.log('[users/organizations] Database connection obtained');
 
+    const cleanedEmail =
+      typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
+    const cleanedEoa =
+      typeof eoa === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa) ? eoa : null;
+
     // Get individual ID
-    const individual = await db.prepare(
-      'SELECT id FROM individuals WHERE email = ?'
-    ).bind(email).first<{ id: number }>();
+    const individual = cleanedEoa
+      ? await db.prepare('SELECT id FROM individuals WHERE eoa_address = ?').bind(cleanedEoa).first<{ id: number }>()
+      : cleanedEmail
+        ? await db.prepare('SELECT id FROM individuals WHERE email = ?').bind(cleanedEmail).first<{ id: number }>()
+        : null;
 
     if (!individual) {
       return NextResponse.json({ organizations: [] });
@@ -110,6 +118,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       email,
+      eoa_address,
       ens_name,
       agent_name,
       org_name,
@@ -122,9 +131,14 @@ export async function POST(request: NextRequest) {
       role,
     } = body;
 
-    if (!email || !ens_name || !agent_name || !email_domain) {
+    const cleanedEmail =
+      typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
+    const cleanedEoa =
+      typeof eoa_address === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa_address) ? eoa_address : null;
+
+    if ((!cleanedEmail && !cleanedEoa) || !ens_name || !agent_name || !email_domain) {
       return NextResponse.json(
-        { error: 'Missing required fields: email, ens_name, agent_name, email_domain' },
+        { error: 'Missing required fields: (email or eoa_address), ens_name, agent_name, email_domain' },
         { status: 400 }
       );
     }
@@ -152,16 +166,16 @@ export async function POST(request: NextRequest) {
     console.log('[users/organizations] Database connection obtained');
 
     // Get or create individual
-    let individual = await db.prepare(
-      'SELECT id FROM individuals WHERE email = ?'
-    ).bind(email).first<{ id: number }>();
+    let individual = cleanedEoa
+      ? await db.prepare('SELECT id FROM individuals WHERE eoa_address = ?').bind(cleanedEoa).first<{ id: number }>()
+      : await db.prepare('SELECT id FROM individuals WHERE email = ?').bind(cleanedEmail).first<{ id: number }>();
 
     if (!individual) {
       // Create individual if it doesn't exist
       const now = Math.floor(Date.now() / 1000);
       const insertResult = await db.prepare(
-        'INSERT INTO individuals (email, created_at, updated_at) VALUES (?, ?, ?)'
-      ).bind(email, now, now).run();
+        'INSERT INTO individuals (email, eoa_address, created_at, updated_at) VALUES (?, ?, ?, ?)'
+      ).bind(cleanedEmail, cleanedEoa, now, now).run();
       
       individual = { id: Number(insertResult.meta.last_row_id) };
     }

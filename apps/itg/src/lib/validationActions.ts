@@ -73,7 +73,7 @@ export async function acceptValidationRequestAction(
 }
 
 /**
- * Send a validation request message to an alliance agent.
+ * Send a validation request message to an coalition agent.
  * This is called after a validation request is submitted on-chain.
  * Messages are sent through the inbox service so they appear in the validator's inbox.
  */

@@ -1,0 +1,28 @@
+---
+description: Use upstream agentic-trust apps as source-of-truth for agent wallet + A2A endpoint behavior
+globs: "apps/itg/**/*.{ts,tsx,js,jsx}"
+alwaysApply: false
+---
+
+# Upstream agentic-trust reference rule
+
+When implementing or fixing anything related to **agent wallet setup** (e.g. “set agent wallet”, sponsored user ops, AA flows) or **A2A agent endpoint construction**, treat the upstream code as the primary reference:
+
+- Admin app (wallet + agent operations): `https://github.com/Agentic-Trust-Layer/agentic-trust/tree/main/apps/admin`
+- ATP agent (A2A endpoint construction): `https://github.com/Agentic-Trust-Layer/agentic-trust/tree/main/apps/atp-agent`
+
+## Required behavior
+
+- **Agent wallet / AA flows**: mirror the upstream sequencing, request payload shapes, and assumptions (e.g. what data is required to “set wallet”, how UAIDs are derived, and which calls are best-effort vs fatal).
+- **A2A endpoint**: mirror how upstream builds/validates the A2A endpoint, what fields are required, and where it’s stored/served.
+
+## Practical workflow (do this before coding)
+
+- Locate the analogous upstream function/route/UI and copy the **data flow** (inputs → transforms → API calls → persisted state).
+- Confirm our code uses the same **request/response shape** for any shared endpoints.
+- Prefer adapting our code to match upstream semantics rather than inventing new ones.
+
+## Guardrails
+
+- Don’t add client-side loops/polling that burn RPC. Prefer server routes for onchain-heavy work.
+- If upstream treats an operation as “best-effort / non-fatal” (e.g. wallet metadata), do the same here.
