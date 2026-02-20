@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS individuals (
   participant_agent_id TEXT, -- ERC-8004 agentId as string
   participant_chain_id INTEGER, -- chain for participant agent (default sepolia)
   participant_did TEXT, -- did:8004:chainId:agentId
+  participant_uaid TEXT, -- UAID for the participant smart account (e.g., HCS-14)
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS organizations (
   org_type TEXT, -- Type: 'organization', 'coalition', 'contributor'
   email_domain TEXT NOT NULL, -- e.g., 'richcanvas.io'
   agent_account TEXT, -- Agent's account address (0x...)
+  uaid TEXT, -- UAID for the organization's smart account (optional)
   chain_id INTEGER NOT NULL DEFAULT 11155111, -- Sepolia by default
   session_package TEXT, -- JSON string of sessionPackage for agent configuration
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),

@@ -49,6 +49,7 @@ async function ensureIndividualsSchema(db: D1Database) {
             participant_agent_id TEXT,
             participant_chain_id INTEGER,
             participant_did TEXT,
+            participant_uaid TEXT,
             created_at INTEGER NOT NULL DEFAULT (unixepoch()),
             updated_at INTEGER NOT NULL DEFAULT (unixepoch())
           );`,
@@ -61,12 +62,13 @@ async function ensureIndividualsSchema(db: D1Database) {
         await db.prepare(
           `INSERT INTO individuals (
             id,email,first_name,last_name,social_account_id,social_account_type,eoa_address,aa_address,
-            participant_ens_name,participant_agent_name,participant_agent_account,participant_agent_id,participant_chain_id,participant_did,
+            participant_ens_name,participant_agent_name,participant_agent_account,participant_agent_id,participant_chain_id,participant_did,participant_uaid,
             created_at,updated_at
           )
           SELECT
             id,email,first_name,last_name,social_account_id,social_account_type,eoa_address,aa_address,
             participant_ens_name,participant_agent_name,participant_agent_account,participant_agent_id,participant_chain_id,participant_did,
+            NULL as participant_uaid,
             created_at,updated_at
           FROM individuals_legacy;`,
         ).run();
@@ -87,6 +89,7 @@ async function ensureIndividualsSchema(db: D1Database) {
       { name: "participant_agent_id", sql: "ALTER TABLE individuals ADD COLUMN participant_agent_id TEXT" },
       { name: "participant_chain_id", sql: "ALTER TABLE individuals ADD COLUMN participant_chain_id INTEGER" },
       { name: "participant_did", sql: "ALTER TABLE individuals ADD COLUMN participant_did TEXT" },
+      { name: "participant_uaid", sql: "ALTER TABLE individuals ADD COLUMN participant_uaid TEXT" },
     ];
     for (const col of desired) {
       if (existing2.has(col.name)) continue;
@@ -200,6 +203,7 @@ export async function POST(request: NextRequest) {
       participant_agent_id,
       participant_chain_id,
       participant_did,
+      participant_uaid,
     } = body;
 
     const cleanedEmail =
@@ -246,6 +250,22 @@ export async function POST(request: NextRequest) {
           .bind(cleanedEmail)
           .first<{ id: number }>();
 
+    // Email can be absent (phone logins) or may conflict with an existing record.
+    // If the provided email is already used by another individual, do NOT write it
+    // (email remains nullable/optional; EOA is the primary key).
+    let effectiveEmail: string | null = cleanedEmail;
+    if (cleanedEmail) {
+      const emailOwner = await db
+        .prepare('SELECT id FROM individuals WHERE email = ?')
+        .bind(cleanedEmail)
+        .first<{ id: number }>();
+
+      if (emailOwner?.id && (!existing?.id || emailOwner.id !== existing.id)) {
+        console.warn('[users/profile] Email is already in use by another individual; skipping email update');
+        effectiveEmail = null;
+      }
+    }
+
     const now = Math.floor(Date.now() / 1000);
     console.log('[users/profile] Profile exists:', !!existing);
 
@@ -269,10 +289,11 @@ export async function POST(request: NextRequest) {
              participant_agent_id = COALESCE(?, participant_agent_id),
              participant_chain_id = COALESCE(?, participant_chain_id),
              participant_did = COALESCE(?, participant_did),
+             participant_uaid = COALESCE(?, participant_uaid),
              updated_at = ?
          WHERE id = ?`
       ).bind(
-        cleanedEmail,
+        effectiveEmail,
         typeof first_name === "string" ? first_name : null,
         typeof last_name === "string" ? last_name : null,
         typeof phone_number === "string" ? phone_number : null,
@@ -287,6 +308,7 @@ export async function POST(request: NextRequest) {
         typeof participant_agent_id === "string" ? participant_agent_id : null,
         typeof participant_chain_id === "number" ? participant_chain_id : null,
         typeof participant_did === "string" ? participant_did : null,
+        typeof participant_uaid === "string" ? participant_uaid : null,
         now,
         existing.id
       ).run();
@@ -299,11 +321,11 @@ export async function POST(request: NextRequest) {
          (email, first_name, last_name, phone_number, social_display_name, social_account_id, social_account_type, 
           eoa_address, aa_address,
           participant_ens_name, participant_agent_name, participant_agent_account,
-          participant_agent_id, participant_chain_id, participant_did,
+          participant_agent_id, participant_chain_id, participant_did, participant_uaid,
           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
-        cleanedEmail,
+        effectiveEmail,
         first_name || null,
         last_name || null,
         phone_number || null,
@@ -318,6 +340,7 @@ export async function POST(request: NextRequest) {
         participant_agent_id || null,
         participant_chain_id || null,
         participant_did || null,
+        participant_uaid || null,
         now,
         now
       ).run();

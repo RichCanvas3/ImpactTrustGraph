@@ -19,6 +19,17 @@ export interface UserProfile {
   participant_agent_id?: string | null;
   participant_chain_id?: number | null;
   participant_did?: string | null;
+  participant_uaid?: string | null;
+}
+
+export function getPreferredIndividualDisplayName(profile: UserProfile | null | undefined): string | null {
+  if (!profile) return null;
+  const first = typeof profile.first_name === "string" ? profile.first_name.trim() : "";
+  const last = typeof profile.last_name === "string" ? profile.last_name.trim() : "";
+  const full = [first, last].filter(Boolean).join(" ").trim();
+  if (full) return full;
+  const social = typeof profile.social_display_name === "string" ? profile.social_display_name.trim() : "";
+  return social || null;
 }
 
 export interface OrganizationAssociation {
@@ -29,6 +40,7 @@ export interface OrganizationAssociation {
   org_type?: string;
   email_domain: string;
   agent_account?: string;
+  uaid?: string | null;
   chain_id?: number;
   is_primary?: boolean;
   role?: string;
@@ -55,6 +67,7 @@ export async function saveUserProfile(profile: UserProfile): Promise<UserProfile
     participant_agent_id: profile.participant_agent_id ?? undefined,
     participant_chain_id: profile.participant_chain_id ?? undefined,
     participant_did: profile.participant_did ?? undefined,
+    participant_uaid: profile.participant_uaid ?? undefined,
   };
 
   const response = await fetch('/api/users/profile', {

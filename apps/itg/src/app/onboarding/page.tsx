@@ -78,6 +78,7 @@ export default function OnboardingPage() {
   const [participantEnsName, setParticipantEnsName] = React.useState<string | null>(null);
   const [participantAgentDid, setParticipantAgentDid] = React.useState<string | null>(null);
   const [participantAgentId, setParticipantAgentId] = React.useState<string | null>(null);
+  const [participantUaid, setParticipantUaid] = React.useState<string | null>(null);
   const [participantEnsAvailability, setParticipantEnsAvailability] = React.useState<{
     checking: boolean;
     available: boolean | null;
@@ -91,6 +92,7 @@ export default function OnboardingPage() {
     ensName: string | null;
   }>({ checking: false, available: null, ensName: null });
   const [customAgentName, setCustomAgentName] = React.useState<string>("");
+  const [orgUaid, setOrgUaid] = React.useState<string | null>(null);
 
   const [orgChoice, setOrgChoice] = React.useState<"connect" | "skip" | "create">("create");
   const [userOrganizations, setUserOrganizations] = React.useState<OrganizationAssociation[]>([]);
@@ -215,6 +217,12 @@ export default function OnboardingPage() {
             eoa_address: walletAddress || null,
             aa_address: aaAddress || null,
           });
+
+          // Prefer first/last name for in-app display once set.
+          const preferred = `${firstName} ${lastName}`.trim();
+          if (preferred && user && user.name !== preferred) {
+            setUser({ ...user, name: preferred });
+          }
         } catch (error) {
           console.warn("Failed to save user profile (first/last name):", error);
         }
@@ -385,6 +393,7 @@ export default function OnboardingPage() {
         );
         setParticipantAgentId(typeof profile.participant_agent_id === "string" ? profile.participant_agent_id : null);
         setParticipantAgentDid(typeof profile.participant_did === "string" ? profile.participant_did : null);
+        setParticipantUaid(typeof profile.participant_uaid === "string" ? profile.participant_uaid : null);
 
         // If we already have an ENS name from the DB, stop any "checking" UI flicker.
         if (typeof profile.participant_ens_name === "string" && profile.participant_ens_name) {
@@ -816,6 +825,31 @@ export default function OnboardingPage() {
       setParticipantAgentDid(did8004);
       setParticipantAgentId(String(createdAgentId));
 
+      // Generate UAID for the participant smart account (admin-compatible endpoint).
+      let createdUaid: string | null = null;
+      try {
+        const uaidRes = await fetch("/api/agents/generate-uaid", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            agentAccount: agentAccountAddress,
+            chainId: sepolia.id,
+            uid: `did:ethr:${sepolia.id}:${String(agentAccountAddress).toLowerCase()}`,
+            registry: "smart-agent",
+            proto: "a2a",
+            nativeId: `eip155:${sepolia.id}:${String(agentAccountAddress).toLowerCase()}`,
+          }),
+        });
+        const uaidJson = await uaidRes.json().catch(() => ({} as any));
+        const uaidValue = typeof uaidJson?.uaid === "string" ? uaidJson.uaid.trim() : "";
+        if (uaidValue) {
+          createdUaid = uaidValue;
+          setParticipantUaid(uaidValue);
+        }
+      } catch {
+        // ignore
+      }
+
       await saveUserProfile({
         ...(userEmail ? { email: userEmail } : {}),
         first_name: firstName || null,
@@ -830,6 +864,7 @@ export default function OnboardingPage() {
         participant_agent_id: String(createdAgentId),
         participant_chain_id: sepolia.id,
         participant_did: did8004,
+        participant_uaid: createdUaid,
       });
     } catch (e: any) {
       const msg = e?.message || String(e);
@@ -890,7 +925,7 @@ export default function OnboardingPage() {
         console.warn("ENS availability check failed:", err);
         setError(
           err?.error ??
-            "Unable to check Impace domain availability. Please try again."
+            "Unable to check Impact domain availability. Please try again."
         );
         return;
       }
@@ -910,7 +945,7 @@ export default function OnboardingPage() {
     } catch (e) {
       console.error(e);
       setError(
-        "Unable to check Impace domain availability. Please try again in a moment."
+        "Unable to check Impact domain availability. Please try again in a moment."
       );
     } finally {
       setIsCheckingAvailability(false);
@@ -1146,7 +1181,7 @@ export default function OnboardingPage() {
           entityId: "trust-relationship",
           displayName: "Trust relationship",
           description:
-            "Trust relationship between individual AA and agent AA for Impace onboarding",
+            "Trust relationship between individual AA and agent AA for Impact onboarding",
           subjectDid,
           objectDid,
           relationshipType: "ally"
@@ -1176,7 +1211,7 @@ export default function OnboardingPage() {
 
       // Associate user with the newly created organization ONLY if agent creation was successful
       // (Profile is already saved incrementally throughout the onboarding process)
-      if (user?.email && agentCreationSuccessful) {
+      if (agentCreationSuccessful && walletAddress) {
         try {
           const ensName = `${agentName}.${ensOrgName}.eth`;
           
@@ -1222,8 +1257,32 @@ export default function OnboardingPage() {
             throw fetchError;
           }
           
-          // Only create database record if agent was successfully verified on-chain
-          await associateUserWithOrganization(user.email, {
+          // Generate UAID for the org smart account (best-effort).
+          let createdOrgUaid: string | null = null;
+          try {
+            const uaidRes = await fetch("/api/agents/generate-uaid", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                agentAccount: actualAgentAccount,
+                chainId: sepolia.id,
+                uid: `did:ethr:${sepolia.id}:${String(actualAgentAccount).toLowerCase()}`,
+                registry: "smart-agent",
+                proto: "a2a",
+                nativeId: `eip155:${sepolia.id}:${String(actualAgentAccount).toLowerCase()}`,
+              }),
+            });
+            const uaidJson = await uaidRes.json().catch(() => ({} as any));
+            const uaidValue = typeof uaidJson?.uaid === "string" ? uaidJson.uaid.trim() : "";
+            if (uaidValue) {
+              createdOrgUaid = uaidValue;
+              setOrgUaid(uaidValue);
+            }
+          } catch {
+            // ignore
+          }
+
+          const orgAssociationPayload = {
             ens_name: ensName,
             agent_name: agentName,
             org_name: org.name || undefined,
@@ -1231,9 +1290,17 @@ export default function OnboardingPage() {
             org_type: org.type || undefined,
             email_domain: emailDomain ?? "",
             agent_account: actualAgentAccount,
+            uaid: createdOrgUaid,
             chain_id: sepolia.id,
             is_primary: true, // This is the primary org based on email domain
-          });
+          };
+
+          // Only create database record if agent was successfully verified on-chain
+          if (userEmail) {
+            await associateUserWithOrganization(userEmail, orgAssociationPayload);
+          } else {
+            await associateUserWithOrganizationByEoa(walletAddress, orgAssociationPayload, null);
+          }
 
           // Set as default org agent with full details
           const defaultAgent: DefaultOrgAgent = {
@@ -1261,7 +1328,7 @@ export default function OnboardingPage() {
           });
           
           // Pass email directly to ensure localStorage is saved
-          setDefaultOrgAgent(defaultAgent, user.email);
+          setDefaultOrgAgent(defaultAgent, userEmail ?? undefined);
           
           // Wait a moment to ensure state is saved before any navigation
           await new Promise((resolve) => setTimeout(resolve, 200));
@@ -1270,8 +1337,8 @@ export default function OnboardingPage() {
         }
       }
 
-      // For the Impace onboarding UI, treat a successful client-side flow as success
-      // and use the human-readable agent name as the Impace identifier.
+      // For the Impact onboarding UI, treat a successful client-side flow as success
+      // and use the human-readable agent name as the Impact identifier.
       setItg(agentName);
       setStep(6);
     } catch (e) {
@@ -1287,7 +1354,7 @@ export default function OnboardingPage() {
           !errorMessage.includes('user rejected')) {
         // This is an unexpected error type, set generic message
         setError(
-          "An unexpected error occurred while creating your Impace Organization Identity. Please try again."
+          "An unexpected error occurred while creating your Impact Organization Identity. Please try again."
         );
       }
     } finally {
@@ -1389,7 +1456,7 @@ export default function OnboardingPage() {
           </h2>
           <p style={{ marginBottom: "1.25rem", lineHeight: 1.5 }}>
             We use Web3Auth to let you sign in with familiar social providers,
-            while also preparing a wallet that can be used for Impace operations.
+            while also preparing a wallet that can be used for Impact operations.
           </p>
 
           {isInitializing && (
@@ -2365,7 +2432,7 @@ export default function OnboardingPage() {
           })()}
 
           <p style={{ marginBottom: "1.5rem" }}>
-            Is it OK to create an Impace Organization Identity for this organization now?
+            Is it OK to create an Impact Organization Identity for this organization now?
           </p>
 
           <div style={{ display: "flex", gap: "0.75rem" }}>
@@ -2400,7 +2467,7 @@ export default function OnboardingPage() {
                 opacity: isCreatingItg ? 0.7 : 1
               }}
             >
-              {isCreatingItg ? "Creating Impace Organization Identity…" : "Yes, create Impace Organization Identity"}
+              {isCreatingItg ? "Creating Impact Organization Identity…" : "Yes, create Impact Organization Identity"}
             </button>
           </div>
 
@@ -2429,7 +2496,7 @@ export default function OnboardingPage() {
               >
                 disconnect and sign in with a different account
               </button>{" "}
-              before creating the Impace Organization Identity.
+              before creating the Impact Organization Identity.
             </p>
           )}
         </section>
@@ -2493,7 +2560,7 @@ export default function OnboardingPage() {
 
           <p style={{ marginTop: "1.25rem", marginBottom: "1.25rem" }}>
             Next, you&apos;ll move into the application environment where we
-            manage operations, resources, and coalition using this Impace.
+            manage operations, resources, and coalition using this Impact.
           </p>
 
           <button

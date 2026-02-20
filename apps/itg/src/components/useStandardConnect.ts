@@ -13,6 +13,8 @@ import {
   associateUserWithOrganizationByEoa,
   getUserOrganizations,
   getUserOrganizationsByEoa,
+  getUserProfile,
+  getPreferredIndividualDisplayName,
 } from "../app/service/userProfileService";
 import { useDefaultOrgAgent, type DefaultOrgAgent } from "./useDefaultOrgAgent";
 import { OrgAgentSelector } from "./OrgAgentSelector";
@@ -216,6 +218,20 @@ export function useStandardConnect() {
     } catch (aaError) {
       console.warn("Failed to get individual AA account address:", aaError);
       // Continue with normal flow if AA account creation fails
+    }
+
+    // If the user has entered first/last name before, prefer that for display.
+    try {
+      const profile = await getUserProfile(undefined, account);
+      const preferred = getPreferredIndividualDisplayName(profile);
+      if (preferred && preferred !== resolvedName) {
+        setUser({
+          name: preferred,
+          ...(cleanedEmail ? { email: cleanedEmail } : {}),
+        });
+      }
+    } catch {
+      // ignore
     }
 
     // Step 5: Check for all organizations associated with this user's email

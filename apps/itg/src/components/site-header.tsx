@@ -33,6 +33,7 @@ import { useDefaultOrgAgent } from "./useDefaultOrgAgent";
 import { OrgAgentSelector } from "./OrgAgentSelector";
 import { sepolia } from "viem/chains";
 import { IndivService } from "../app/service/indivService";
+import { getUserProfile, getPreferredIndividualDisplayName } from "../app/service/userProfileService";
 
 export function SiteHeader() {
   const router = useRouter();
@@ -148,6 +149,27 @@ export function SiteHeader() {
 
     void fetchAddresses();
   }, [user, web3auth]);
+
+  // If profile has first/last name, use it as the display name.
+  React.useEffect(() => {
+    if (!user || !walletAddress) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await getUserProfile(undefined, walletAddress);
+        if (cancelled || !profile) return;
+        const preferred = getPreferredIndividualDisplayName(profile);
+        if (preferred && preferred !== user.name) {
+          setUser({ ...user, name: preferred });
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, walletAddress, setUser]);
 
   // When the org selector closes (after selection or cancel), clear the "selecting" spinner
   React.useEffect(() => {

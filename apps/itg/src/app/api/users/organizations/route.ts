@@ -13,6 +13,23 @@ async function getDB(): Promise<D1Database | null> {
   return await getD1Database();
 }
 
+let ensureOrganizationsSchemaPromise: Promise<void> | null = null;
+async function ensureOrganizationsSchema(db: D1Database) {
+  if (ensureOrganizationsSchemaPromise) return ensureOrganizationsSchemaPromise;
+  ensureOrganizationsSchemaPromise = (async () => {
+    const info = await db.prepare("PRAGMA table_info(organizations)").all<{ name: string }>();
+    const existing = new Set((info.results || []).map((c) => c.name));
+    if (!existing.has("uaid")) {
+      try {
+        await db.prepare("ALTER TABLE organizations ADD COLUMN uaid TEXT").run();
+      } catch {
+        // ignore
+      }
+    }
+  })();
+  return ensureOrganizationsSchemaPromise;
+}
+
 export async function GET(request: NextRequest) {
   try {
     console.log('[users/organizations] GET request received');
@@ -48,6 +65,7 @@ export async function GET(request: NextRequest) {
       );
     }
     console.log('[users/organizations] Database connection obtained');
+    await ensureOrganizationsSchema(db);
 
     const cleanedEmail =
       typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
@@ -94,6 +112,7 @@ export async function GET(request: NextRequest) {
       org_type: row.org_type,
       email_domain: row.email_domain,
       agent_account: row.agent_account,
+      uaid: (row as any).uaid ?? null,
       chain_id: row.chain_id,
       is_primary: row.is_primary === 1,
       role: row.role,
@@ -126,6 +145,7 @@ export async function POST(request: NextRequest) {
       org_type,
       email_domain,
       agent_account,
+      uaid,
       chain_id,
       is_primary,
       role,
@@ -164,6 +184,7 @@ export async function POST(request: NextRequest) {
       );
     }
     console.log('[users/organizations] Database connection obtained');
+    await ensureOrganizationsSchema(db);
 
     // Get or create individual
     let individual = cleanedEoa
@@ -193,8 +214,8 @@ export async function POST(request: NextRequest) {
       const insertResult = await db.prepare(
         `INSERT INTO organizations 
          (ens_name, agent_name, org_name, org_address, org_type, email_domain, 
-          agent_account, chain_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          agent_account, uaid, chain_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         ens_name,
         agent_name,
@@ -203,6 +224,7 @@ export async function POST(request: NextRequest) {
         org_type || null,
         email_domain,
         agent_account || null,
+        typeof uaid === "string" ? uaid : null,
         resolvedChainId,
         now,
         now
@@ -215,7 +237,7 @@ export async function POST(request: NextRequest) {
       await db.prepare(
         `UPDATE organizations 
          SET agent_name = ?, org_name = ?, org_address = ?, org_type = ?, 
-             agent_account = ?, updated_at = ?
+             agent_account = ?, uaid = COALESCE(?, uaid), updated_at = ?
          WHERE ens_name = ?`
       ).bind(
         agent_name,
@@ -223,6 +245,7 @@ export async function POST(request: NextRequest) {
         org_address || null,
         org_type || null,
         agent_account || null,
+        typeof uaid === "string" ? uaid : null,
         now,
         ens_name
       ).run();
