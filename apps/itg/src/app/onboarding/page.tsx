@@ -833,6 +833,32 @@ export default function OnboardingPage() {
       };
 
       try {
+        // UAID is canonical. Try to use it from the selected agent card; otherwise hydrate via by-account.
+        let effectiveUaid: string | null =
+          typeof agent?.uaid === "string" && agent.uaid.trim()
+            ? agent.uaid.trim()
+            : typeof agent?.agent?.uaid === "string" && agent.agent.uaid.trim()
+              ? agent.agent.uaid.trim()
+              : null;
+        if (!effectiveUaid && agentAccount && chainId) {
+          try {
+            const didEthr = `did:ethr:${chainId}:${agentAccount}`;
+            const agentResp = await fetch(`/api/agents/by-account/${encodeURIComponent(didEthr)}`);
+            const agentData = agentResp.ok ? await agentResp.json().catch(() => null) : null;
+            effectiveUaid =
+              agentData && agentData.found === true && typeof agentData.uaid === "string" && agentData.uaid.trim()
+                ? String(agentData.uaid).trim()
+                : typeof agentData?.agent?.uaid === "string" && agentData.agent.uaid.trim()
+                  ? String(agentData.agent.uaid).trim()
+                  : null;
+          } catch {
+            // ignore; handled below
+          }
+        }
+        if (effectiveUaid) {
+          (defaultAgent as any).uaid = effectiveUaid;
+        }
+
         if (userEmail) {
           await associateUserWithOrganization(userEmail, {
             ens_name: ensName,
@@ -842,6 +868,7 @@ export default function OnboardingPage() {
             org_type: undefined,
             email_domain: emailDomain ?? "unknown",
             agent_account: agentAccount || undefined,
+            uaid: effectiveUaid,
             chain_id: chainId,
             is_primary: false,
             role: undefined,
@@ -857,6 +884,7 @@ export default function OnboardingPage() {
               org_type: undefined,
               email_domain: emailDomain ?? "unknown",
               agent_account: agentAccount || undefined,
+              uaid: effectiveUaid,
               chain_id: chainId,
               is_primary: false,
               role: undefined,
@@ -1448,6 +1476,15 @@ export default function OnboardingPage() {
             // ignore
           }
 
+          const hydratedOrgUaid: string | null =
+            typeof createdOrgUaid === "string" && createdOrgUaid.trim()
+              ? createdOrgUaid.trim()
+              : typeof (fullAgentDetails as any)?.uaid === "string" && String((fullAgentDetails as any).uaid).trim()
+                ? String((fullAgentDetails as any).uaid).trim()
+                : typeof (fullAgentDetails as any)?.agent?.uaid === "string" && String((fullAgentDetails as any).agent.uaid).trim()
+                  ? String((fullAgentDetails as any).agent.uaid).trim()
+                  : null;
+
           const orgAssociationPayload = {
             ens_name: ensName,
             agent_name: agentName,
@@ -1456,7 +1493,7 @@ export default function OnboardingPage() {
             org_type: org.type || undefined,
             email_domain: emailDomain ?? "unknown",
             agent_account: actualAgentAccount,
-            uaid: createdOrgUaid,
+            uaid: hydratedOrgUaid,
             org_metadata: (() => {
               const m: Record<string, any> = {};
               if (effectiveRole === "org-admin") {
@@ -1504,6 +1541,7 @@ export default function OnboardingPage() {
             metadata: fullAgentDetails?.metadata || (result as any)?.metadata,
             did: fullAgentDetails?.did,
             a2aEndpoint: fullAgentDetails?.a2aEndpoint || (result as any)?.a2aEndpoint,
+            ...(hydratedOrgUaid ? { uaid: hydratedOrgUaid } : {}),
             ...(fullAgentDetails || result as any),
           };
           

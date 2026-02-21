@@ -22,8 +22,8 @@ import { useDefaultOrgAgent } from "../../components/useDefaultOrgAgent";
 import { useCurrentUserProfile } from "../../components/useCurrentUserProfile";
 import { useWeb3Auth } from "../../components/Web3AuthProvider";
 import {
-  associateUserWithOrganizationByEoa,
-  getUserOrganizationsByEoa,
+  getUserOrganizationsByIndividualId,
+  upsertUserOrganizationByIndividualId,
   type OrganizationAssociation,
 } from "../service/userProfileService";
 import { generateSessionPackage } from "@agentic-trust/core";
@@ -119,6 +119,12 @@ export default function OrganizationSettingsPage() {
   const { web3auth } = useWeb3Auth();
   const { defaultOrgAgent } = useDefaultOrgAgent();
   const { walletAddress, profile } = useCurrentUserProfile();
+  const individualId = React.useMemo(() => {
+    const raw = (profile as any)?.id;
+    if (raw == null) return null;
+    const n = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [profile]);
 
   const [tab, setTab] = React.useState<OrgSettingsTab>("settings");
   const [organization, setOrganization] = React.useState<OrganizationAssociation | null>(null);
@@ -139,24 +145,23 @@ export default function OrganizationSettingsPage() {
 
   const hydrateKeyRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!walletAddress) {
+    if (!individualId) {
       setOrganization(null);
       setLoading(false);
+      hydrateKeyRef.current = null;
       return;
     }
-    const eoa = walletAddress.toLowerCase();
     const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
-    const hydrateKey = `${eoa}:${desiredEns}`;
+    const hydrateKey = `${individualId}:${desiredEns}`;
     if (hydrateKeyRef.current === hydrateKey) return;
-    hydrateKeyRef.current = hydrateKey;
 
-    let cancelled = false;
+    const ac = new AbortController();
     setLoading(true);
     setError(null);
     (async () => {
       try {
-        const orgs = await getUserOrganizationsByEoa(eoa);
-        if (cancelled) return;
+        const orgs = await getUserOrganizationsByIndividualId(individualId);
+        if (ac.signal.aborted) return;
         const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
         const match =
           desiredEns && orgs.length > 0
@@ -167,16 +172,20 @@ export default function OrganizationSettingsPage() {
         setOrgName(selected?.org_name ?? "");
         setOrgAddress(selected?.org_address ?? "");
         setOrgType(selected?.org_type ?? "");
+        hydrateKeyRef.current = hydrateKey; // cache only after success
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || String(e));
+        if (e?.name !== "AbortError") setError(e?.message || String(e));
+        hydrateKeyRef.current = null;
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     })();
     return () => {
-      cancelled = true;
+      ac.abort();
+      setLoading(false);
+      hydrateKeyRef.current = null; // allow retry after abort/reconnect
     };
-  }, [walletAddress, defaultOrgAgent?.ensName]);
+  }, [individualId, defaultOrgAgent?.ensName]);
 
   const uaid = organization?.uaid ?? null;
   const ensName = organization?.ens_name ?? defaultOrgAgent?.ensName ?? null;
@@ -194,66 +203,100 @@ export default function OrganizationSettingsPage() {
     );
   }, [organization?.agent_card_json, defaultOrgAgent?.agentId]);
 
+  const hydrateSelectedOrg = React.useCallback(async () => {
+    if (!individualId) throw new Error("Missing individualId (profile not hydrated).");
+    if (!organization?.ens_name) throw new Error("Missing organization ENS name.");
+    const resolvedChainId = Number(organization.chain_id ?? chainId ?? 11155111);
+    if (!Number.isFinite(resolvedChainId)) throw new Error("Invalid chainId for organization.");
+
+    // ENS → smart-account (AA) address
+    const didEns = `did:ens:${resolvedChainId}:${organization.ens_name}`;
+    const ensResp = await fetch(`/api/names/${encodeURIComponent(didEns)}`);
+    if (!ensResp.ok) throw new Error("Failed to resolve org ENS to agent account.");
+    const ensData = await ensResp.json().catch(() => null);
+    const resolvedAccount = ensData?.nameInfo?.account;
+    if (!resolvedAccount || typeof resolvedAccount !== "string" || !resolvedAccount.startsWith("0x")) {
+      throw new Error("ENS did not resolve to a smart-account address.");
+    }
+
+    // AA account → agent card (contains agentId)
+    const didEthr = `did:ethr:${resolvedChainId}:${resolvedAccount}`;
+    const agentResp = await fetch(`/api/agents/by-account/${encodeURIComponent(didEthr)}`);
+    const agentData = agentResp.ok ? await agentResp.json().catch(() => null) : null;
+    const discoveredUaid =
+      agentData && agentData.found === true
+        ? (typeof (agentData as any).uaid === "string" && (agentData as any).uaid.trim()
+            ? String((agentData as any).uaid).trim()
+            : typeof (agentData as any).agent?.uaid === "string" && (agentData as any).agent.uaid.trim()
+              ? String((agentData as any).agent.uaid).trim()
+              : null)
+        : null;
+    const effectiveUaid =
+      typeof organization.uaid === "string" && organization.uaid.trim() ? organization.uaid.trim() : discoveredUaid;
+    if (!effectiveUaid) {
+      throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
+    }
+    const agentCardJson =
+      agentData && agentData.found === true ? JSON.stringify({ ...agentData }) : organization.agent_card_json ?? null;
+
+    // Persist to organizations + individual_organizations (no email/EOA)
+    await upsertUserOrganizationByIndividualId({
+      individual_id: individualId,
+      ens_name: organization.ens_name,
+      agent_name: organization.agent_name,
+      org_name: organization.org_name ?? null,
+      org_address: organization.org_address ?? null,
+      org_type: organization.org_type ?? null,
+      agent_account: resolvedAccount.toLowerCase(),
+      uaid: effectiveUaid,
+      chain_id: resolvedChainId,
+      session_package: organization.session_package ?? null,
+      agent_card_json: agentCardJson,
+      org_metadata: organization.org_metadata ?? null,
+      is_primary: organization.is_primary,
+      role: organization.role ?? null,
+    });
+
+    // Refresh local state
+    const orgs = await getUserOrganizationsByIndividualId(individualId);
+    const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
+    const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
+    const match =
+      desiredEns && orgs.length > 0
+        ? orgs.find((o) => String(o.ens_name || "").toLowerCase() === desiredEns) ?? null
+        : null;
+    const refreshed = match ?? primary;
+    setOrganization(refreshed);
+
+    return {
+      agentId: coerceAgentIdToNumber((agentData as any)?.agentId ?? (agentData as any)?.agent_id ?? null),
+      agentAccount: resolvedAccount.toLowerCase(),
+      chainId: resolvedChainId,
+      uaid: effectiveUaid,
+    };
+  }, [individualId, organization, chainId, defaultOrgAgent?.ensName]);
+
   // Self-heal: if org row is missing agent identifiers, hydrate from ENS + by-account and upsert.
   React.useEffect(() => {
-    if (!walletAddress) return;
     if (!organization) return;
     if (!organization.ens_name) return;
-    const resolvedChainId = Number(organization.chain_id ?? chainId ?? 11155111);
-    if (!Number.isFinite(resolvedChainId)) return;
-
     const needsHydration =
       !organization.agent_account ||
       !organization.agent_card_json ||
       organization.agent_row_id == null;
     if (!needsHydration) return;
 
-    const key = `${walletAddress.toLowerCase()}:${resolvedChainId}:${String(organization.ens_name).toLowerCase()}`;
+    if (!individualId) return;
+    const resolvedChainId = Number(organization.chain_id ?? chainId ?? 11155111);
+    if (!Number.isFinite(resolvedChainId)) return;
+    const key = `${individualId}:${resolvedChainId}:${String(organization.ens_name).toLowerCase()}`;
     if (agentHydrateKeyRef.current === key) return;
     agentHydrateKeyRef.current = key;
 
     let cancelled = false;
     (async () => {
       try {
-        const didEns = `did:ens:${resolvedChainId}:${organization.ens_name}`;
-        const ensResp = await fetch(`/api/names/${encodeURIComponent(didEns)}`);
-        if (!ensResp.ok) throw new Error("Failed to resolve org ENS to agent account.");
-        const ensData = await ensResp.json().catch(() => null);
-        const resolvedAccount = ensData?.nameInfo?.account;
-        if (!resolvedAccount || typeof resolvedAccount !== "string" || !resolvedAccount.startsWith("0x")) {
-          throw new Error("ENS did not resolve to a smart-account address.");
-        }
-
-        const didEthr = `did:ethr:${resolvedChainId}:${resolvedAccount}`;
-        const agentResp = await fetch(`/api/agents/by-account/${encodeURIComponent(didEthr)}`);
-        const agentData = agentResp.ok ? await agentResp.json().catch(() => null) : null;
-        const agentCardJson =
-          agentData && agentData.found === true
-            ? JSON.stringify({ ...agentData })
-            : organization.agent_card_json ?? null;
-
-        if (cancelled) return;
-
-        await associateUserWithOrganizationByEoa(
-          walletAddress.toLowerCase(),
-          {
-            ...organization,
-            agent_account: resolvedAccount.toLowerCase(),
-            chain_id: resolvedChainId,
-            agent_card_json: agentCardJson,
-          },
-          profile?.email ?? null,
-        );
-
-        const orgs = await getUserOrganizationsByEoa(walletAddress.toLowerCase());
-        const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
-        const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
-        const match =
-          desiredEns && orgs.length > 0
-            ? orgs.find((o) => String(o.ens_name || "").toLowerCase() === desiredEns) ?? null
-            : null;
-        const refreshed = match ?? primary;
-        if (!cancelled) setOrganization(refreshed);
+        await hydrateSelectedOrg();
       } catch (e) {
         // Don't block page usage; just log.
         console.warn("[organization-settings] agent hydration failed:", e);
@@ -263,11 +306,11 @@ export default function OrganizationSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [walletAddress, organization, chainId, profile?.email, defaultOrgAgent?.ensName]);
+  }, [individualId, organization, chainId, defaultOrgAgent?.ensName, hydrateSelectedOrg]);
 
   const saveOrganization = React.useCallback(async () => {
-    if (!walletAddress) {
-      setError("Missing wallet address. Reconnect and try again.");
+    if (!individualId) {
+      setError("Missing individualId. Reconnect and try again.");
       return;
     }
     if (!organization) {
@@ -283,8 +326,27 @@ export default function OrganizationSettingsPage() {
         org_address: orgAddress || undefined,
         org_type: orgType || undefined,
       };
-      await associateUserWithOrganizationByEoa(walletAddress.toLowerCase(), updated, profile?.email ?? null);
-      const orgs = await getUserOrganizationsByEoa(walletAddress.toLowerCase());
+      const effectiveUaid =
+        typeof updated.uaid === "string" && updated.uaid.trim()
+          ? updated.uaid.trim()
+          : (await hydrateSelectedOrg()).uaid;
+      await upsertUserOrganizationByIndividualId({
+        individual_id: individualId,
+        ens_name: updated.ens_name,
+        agent_name: updated.agent_name,
+        org_name: updated.org_name ?? null,
+        org_address: updated.org_address ?? null,
+        org_type: updated.org_type ?? null,
+        agent_account: updated.agent_account ?? null,
+        uaid: effectiveUaid,
+        chain_id: updated.chain_id ?? null,
+        session_package: updated.session_package ?? null,
+        agent_card_json: updated.agent_card_json ?? null,
+        org_metadata: updated.org_metadata ?? null,
+        is_primary: updated.is_primary,
+        role: updated.role ?? null,
+      });
+      const orgs = await getUserOrganizationsByIndividualId(individualId);
       const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
       setOrganization(primary);
     } catch (e: any) {
@@ -292,7 +354,7 @@ export default function OrganizationSettingsPage() {
     } finally {
       setSaving(false);
     }
-  }, [walletAddress, organization, orgName, orgAddress, orgType, profile?.email]);
+  }, [individualId, organization, orgName, orgAddress, orgType]);
 
   const handleGenerateSessionPackage = React.useCallback(async () => {
     setSessionPkg(null);
@@ -301,12 +363,12 @@ export default function OrganizationSettingsPage() {
       setSessionError("Missing organization ENS name. Select/set a default org agent first.");
       return;
     }
-    if (!agentId) {
-      setSessionError("Missing agentId for selected organization agent. Re-select the org agent (needs an on-chain agentId).");
-      return;
-    }
     if (!walletAddress) {
       setSessionError("Wallet address is required to generate a session package.");
+      return;
+    }
+    if (!individualId) {
+      setSessionError("Missing individualId (profile not hydrated).");
       return;
     }
     // Web3Auth sometimes restores `connected` state before `provider` is set.
@@ -326,6 +388,21 @@ export default function OrganizationSettingsPage() {
       return;
     }
     try {
+      // Ensure we have a usable agentId (hydrate from KB if needed).
+      let effectiveAgentId = agentId;
+      if (!effectiveAgentId) {
+        try {
+          const hydrated = await hydrateSelectedOrg();
+          effectiveAgentId = hydrated.agentId ?? null;
+        } catch {
+          // ignore; will error below
+        }
+      }
+      if (!effectiveAgentId) {
+        setSessionError("Missing agentId for selected organization agent (unable to hydrate). Re-select the org agent.");
+        return;
+      }
+
       const owner = walletAddress.toLowerCase() as Address;
       let aa = (agentAccount as Address | null) ?? null;
       if (!aa) {
@@ -370,7 +447,7 @@ export default function OrganizationSettingsPage() {
       }
 
       const pkg = await generateSessionPackage({
-        agentId,
+        agentId: effectiveAgentId,
         chainId,
         agentAccount: aa,
         provider: eip1193Provider,
@@ -386,18 +463,27 @@ export default function OrganizationSettingsPage() {
 
       // Persist immediately (org + canonical agents row).
       if (organization) {
-        await associateUserWithOrganizationByEoa(
-          walletAddress.toLowerCase(),
-          {
-            ...organization,
-            agent_account: (aa as string) ?? organization.agent_account,
-            chain_id: chainId,
-            session_package: JSON.stringify(pkg),
-            agent_card_json: organization.agent_card_json ?? null,
-          },
-          profile?.email ?? null,
-        );
-        const orgs = await getUserOrganizationsByEoa(walletAddress.toLowerCase());
+        const effectiveUaid =
+          typeof organization.uaid === "string" && organization.uaid.trim()
+            ? organization.uaid.trim()
+            : (await hydrateSelectedOrg()).uaid;
+        await upsertUserOrganizationByIndividualId({
+          individual_id: individualId,
+          ens_name: organization.ens_name,
+          agent_name: organization.agent_name,
+          org_name: organization.org_name ?? null,
+          org_address: organization.org_address ?? null,
+          org_type: organization.org_type ?? null,
+          agent_account: ((aa as string) ?? organization.agent_account) ?? null,
+          uaid: effectiveUaid,
+          chain_id: chainId,
+          session_package: JSON.stringify(pkg),
+          agent_card_json: organization.agent_card_json ?? null,
+          org_metadata: organization.org_metadata ?? null,
+          is_primary: organization.is_primary,
+          role: organization.role ?? null,
+        });
+        const orgs = await getUserOrganizationsByIndividualId(individualId);
         const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
         const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
         const match =
@@ -416,14 +502,19 @@ export default function OrganizationSettingsPage() {
     web3auth,
     walletAddress,
     organization,
-    profile?.email,
     defaultOrgAgent?.ensName,
     ensName,
+    individualId,
+    hydrateSelectedOrg,
   ]);
 
   const handleSaveSessionPackage = React.useCallback(async () => {
     if (!walletAddress) {
       setSessionError("Missing wallet address.");
+      return;
+    }
+    if (!individualId) {
+      setSessionError("Missing individualId (profile not hydrated).");
       return;
     }
     if (!organization) {
@@ -438,18 +529,27 @@ export default function OrganizationSettingsPage() {
     setSessionError(null);
     try {
       // Persist into organizations + agents tables (route upserts agents row now).
-      await associateUserWithOrganizationByEoa(
-        walletAddress.toLowerCase(),
-        {
-          ...organization,
-          agent_account: agentAccount ?? organization.agent_account,
-          chain_id: chainId,
-          session_package: JSON.stringify(sessionPkg),
-          agent_card_json: organization.agent_card_json ?? null,
-        },
-        profile?.email ?? null,
-      );
-      const orgs = await getUserOrganizationsByEoa(walletAddress.toLowerCase());
+      const effectiveUaid =
+        typeof organization.uaid === "string" && organization.uaid.trim()
+          ? organization.uaid.trim()
+          : (await hydrateSelectedOrg()).uaid;
+      await upsertUserOrganizationByIndividualId({
+        individual_id: individualId,
+        ens_name: organization.ens_name,
+        agent_name: organization.agent_name,
+        org_name: organization.org_name ?? null,
+        org_address: organization.org_address ?? null,
+        org_type: organization.org_type ?? null,
+        agent_account: (agentAccount ?? organization.agent_account) ?? null,
+        uaid: effectiveUaid,
+        chain_id: chainId,
+        session_package: JSON.stringify(sessionPkg),
+        agent_card_json: organization.agent_card_json ?? null,
+        org_metadata: organization.org_metadata ?? null,
+        is_primary: organization.is_primary,
+        role: organization.role ?? null,
+      });
+      const orgs = await getUserOrganizationsByIndividualId(individualId);
       const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
       const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
       const match =
@@ -462,7 +562,7 @@ export default function OrganizationSettingsPage() {
     } finally {
       setSaving(false);
     }
-  }, [walletAddress, organization, sessionPkg, profile?.email, agentAccount, chainId, defaultOrgAgent?.ensName]);
+  }, [walletAddress, individualId, organization, sessionPkg, agentAccount, chainId, defaultOrgAgent?.ensName]);
 
   const existingSession = React.useMemo(() => {
     const raw = organization?.session_package ?? null;
