@@ -1,11 +1,16 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { ensureInitiativesSchema, emitAttestation, getDB } from "../../_db";
+import { ensureInitiativesSchema, emitAttestation, getDB, resolveIndividualIdByEoa } from "../../_db";
 
 function parseId(raw: string): number | null {
   const n = Number.parseInt(String(raw || ""), 10);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function cleanEoa(raw: unknown): string | null {
+  const v = typeof raw === "string" ? raw.trim() : "";
+  return /^0x[a-fA-F0-9]{40}$/.test(v) ? v.toLowerCase() : null;
 }
 
 export async function POST(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -23,6 +28,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
       role,
       status,
       actor_individual_id,
+      actor_eoa,
     } = body || {};
 
     if (action !== "add" && action !== "remove" && action !== "update") {
@@ -49,11 +55,9 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     }
 
     const now = Math.floor(Date.now() / 1000);
+    const eoa = cleanEoa(actor_eoa);
     const actorIndividualId =
-      typeof actor_individual_id === "number" && actor_individual_id > 0 ? actor_individual_id : null;
-    if (!actorIndividualId) {
-      return NextResponse.json({ error: "actor_individual_id is required (number > 0)" }, { status: 400 });
-    }
+      typeof actor_individual_id === "number" ? actor_individual_id : eoa ? await resolveIndividualIdByEoa(db, eoa) : null;
 
     if (action === "add") {
       await db

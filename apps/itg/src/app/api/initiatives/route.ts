@@ -1,15 +1,22 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { ensureInitiativesSchema, getDB, resolveOrganizationIdsForIndividual, emitAttestation } from "./_db";
+import { ensureInitiativesSchema, getDB, resolveIndividualIdByEoa, resolveOrganizationIdsForIndividual, emitAttestation } from "./_db";
+
+function cleanEoa(raw: string | null): string | null {
+  if (!raw) return null;
+  const v = raw.trim();
+  return /^0x[a-fA-F0-9]{40}$/.test(v) ? v.toLowerCase() : null;
+}
 
 type InitiativeState = "draft" | "chartered" | "funded" | "executing" | "evaluating" | "closed";
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
+    const eoa = cleanEoa(searchParams.get("eoa"));
     const individualIdParam = searchParams.get("individualId");
-    const individualId =
+    const individualIdFromParam =
       individualIdParam && Number.isFinite(Number(individualIdParam)) ? Number.parseInt(individualIdParam, 10) : null;
     const scope = (searchParams.get("scope") ?? "active").toLowerCase(); // active|mine|all
 
@@ -21,10 +28,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
     }
 
-    if (scope === "mine" && (typeof individualId !== "number" || individualId < 1)) {
-      return NextResponse.json({ initiatives: [] });
-    }
-
+    // Resolve individualId (prefer explicit param; fallback to EOA lookup).
+    const individualId =
+      typeof individualIdFromParam === "number" && individualIdFromParam > 0
+        ? individualIdFromParam
+        : eoa
+          ? await resolveIndividualIdByEoa(db, eoa)
+          : null;
     const orgIds = individualId ? await resolveOrganizationIdsForIndividual(db, individualId) : [];
 
     const whereParts: string[] = [];
@@ -37,20 +47,17 @@ export async function GET(request: NextRequest) {
     if (scope === "mine") {
       if (!individualId) return NextResponse.json({ initiatives: [] });
       // Mine = initiatives you created OR initiatives where you (or your orgs) are participants.
-      const orgInClause =
-        orgIds.length > 0
-          ? `organization_id IN (${orgIds.map(() => "?").join(",")})`
-          : "1=0";
       whereParts.push(
         `(created_by_individual_id = ?
           OR id IN (
             SELECT initiative_id FROM initiative_participants
             WHERE (participant_kind = 'individual' AND individual_id = ?)
-               OR (participant_kind = 'organization' AND ${orgInClause})
+               OR (participant_kind = 'organization' AND organization_id IN (${orgIds.length ? orgIds.map(() => "?").join(",") : "NULL"}))
           ))`,
       );
-      binds.push(individualId, individualId);
-      if (orgIds.length > 0) binds.push(...orgIds);
+      binds.push(individualId);
+      binds.push(individualId ?? -1);
+      binds.push(...orgIds);
     }
 
     const where = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
@@ -67,16 +74,7 @@ export async function GET(request: NextRequest) {
       .bind(...binds)
       .all();
 
-    const raw = rows.results;
-    const list = Array.isArray(raw) ? raw : [];
-    const initiatives = list.map((r: Record<string, unknown>) => ({
-      ...r,
-      id: typeof r.id === "string" ? Number(r.id) : r.id,
-      created_by_individual_id: r.created_by_individual_id != null && typeof r.created_by_individual_id === "string" ? Number(r.created_by_individual_id) : r.created_by_individual_id,
-      created_at: r.created_at != null && typeof r.created_at === "string" ? Number(r.created_at) : r.created_at,
-      updated_at: r.updated_at != null && typeof r.updated_at === "string" ? Number(r.updated_at) : r.updated_at,
-    }));
-    return NextResponse.json({ initiatives });
+    return NextResponse.json({ initiatives: rows.results || [] });
   } catch (error) {
     console.error("[initiatives] GET error:", error);
     return NextResponse.json({ error: "Failed to list initiatives", message: error instanceof Error ? error.message : String(error) }, { status: 500 });
@@ -91,6 +89,7 @@ export async function POST(request: NextRequest) {
       summary,
       state,
       created_by_individual_id,
+      actor_eoa,
       created_by_org_id,
       governance_json,
       budget_json,
@@ -103,15 +102,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "title is required" }, { status: 400 });
     }
 
-    const individualId =
-      typeof created_by_individual_id === "number" && created_by_individual_id > 0 ? created_by_individual_id : null;
-    if (!individualId) {
-      return NextResponse.json({ error: "created_by_individual_id is required (number > 0)" }, { status: 400 });
-    }
-
+    const eoa = typeof actor_eoa === "string" ? cleanEoa(actor_eoa) : null;
     const db = await getDB();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 500 });
     await ensureInitiativesSchema(db);
+
+    const individualId =
+      typeof created_by_individual_id === "number"
+        ? created_by_individual_id
+        : eoa
+          ? await resolveIndividualIdByEoa(db, eoa)
+          : null;
+    if (!individualId) {
+      return NextResponse.json({ error: "created_by_individual_id is required" }, { status: 400 });
+    }
     const now = Math.floor(Date.now() / 1000);
     const desiredState: InitiativeState =
       typeof state === "string" && ["draft", "chartered", "funded", "executing", "evaluating", "closed"].includes(state)

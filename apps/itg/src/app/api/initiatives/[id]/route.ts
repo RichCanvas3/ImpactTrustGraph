@@ -1,11 +1,16 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { ensureInitiativesSchema, emitAttestation, getDB } from "../_db";
+import { ensureInitiativesSchema, emitAttestation, getDB, resolveIndividualIdByEoa } from "../_db";
 
 function parseId(raw: string): number | null {
   const n = Number.parseInt(String(raw || ""), 10);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function cleanEoa(raw: unknown): string | null {
+  const v = typeof raw === "string" ? raw.trim() : "";
+  return /^0x[a-fA-F0-9]{40}$/.test(v) ? v.toLowerCase() : null;
 }
 
 type InitiativeState = "draft" | "chartered" | "funded" | "executing" | "evaluating" | "closed";
@@ -134,17 +139,12 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
       payout_rules_json,
       metadata_json,
       actor_individual_id,
+      actor_eoa,
     } = body || {};
 
     const db = await getDB();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 500 });
     await ensureInitiativesSchema(db);
-
-    const individualId =
-      typeof actor_individual_id === "number" && actor_individual_id > 0 ? actor_individual_id : null;
-    if (!individualId) {
-      return NextResponse.json({ error: "actor_individual_id is required (number > 0)" }, { status: 400 });
-    }
 
     const existing = await db.prepare("SELECT * FROM initiatives WHERE id = ?").bind(initiativeId).first();
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -181,6 +181,9 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
       )
       .run();
 
+    const eoa = cleanEoa(actor_eoa);
+    const individualId =
+      typeof actor_individual_id === "number" ? actor_individual_id : eoa ? await resolveIndividualIdByEoa(db, eoa) : null;
     await emitAttestation(db, {
       attestation_type: "initiative.updated",
       payload: { title, summary, state: desiredState },
