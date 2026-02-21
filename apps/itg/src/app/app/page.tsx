@@ -389,6 +389,7 @@ export default function ApplicationEnvironmentPage() {
               value={state}
               onChange={(e) => setState(e.target.value as InitiativeState)}
               SelectProps={{ native: true }}
+              InputLabelProps={{ shrink: true }}
               fullWidth
             >
               {(["draft", "chartered", "funded", "executing", "evaluating", "closed"] as InitiativeState[]).map((s) => (
@@ -611,6 +612,7 @@ export default function ApplicationEnvironmentPage() {
                   value={stateDraft}
                   onChange={(e) => setStateDraft(e.target.value as InitiativeState)}
                   SelectProps={{ native: true }}
+                  InputLabelProps={{ shrink: true }}
                   size="small"
                   sx={{ width: { xs: "100%", md: 240 } }}
                 >
@@ -665,6 +667,7 @@ export default function ApplicationEnvironmentPage() {
                   size="small"
                   value={String(primaryOrg?.id ?? "")}
                   SelectProps={{ native: true }}
+                  InputLabelProps={{ shrink: true }}
                   sx={{ width: { xs: "100%", md: 360 } }}
                   disabled
                 >
@@ -749,6 +752,7 @@ export default function ApplicationEnvironmentPage() {
                       value={oppStatus}
                       onChange={(e) => setOppStatus(e.target.value)}
                       SelectProps={{ native: true }}
+                      InputLabelProps={{ shrink: true }}
                     >
                       <option value="draft">Draft</option>
                       <option value="open">Open</option>
@@ -823,6 +827,7 @@ export default function ApplicationEnvironmentPage() {
                       value={engOppId === "" ? "" : String(engOppId)}
                       onChange={(e) => setEngOppId(e.target.value ? Number(e.target.value) : "")}
                       SelectProps={{ native: true }}
+                      InputLabelProps={{ shrink: true }}
                     >
                       <option value="">Select an opportunity…</option>
                       {openOpps.map((o) => (
@@ -845,6 +850,7 @@ export default function ApplicationEnvironmentPage() {
                       value={engStatus}
                       onChange={(e) => setEngStatus(e.target.value)}
                       SelectProps={{ native: true }}
+                      InputLabelProps={{ shrink: true }}
                     >
                       <option value="proposed">Proposed</option>
                       <option value="active">Active</option>
@@ -928,6 +934,7 @@ export default function ApplicationEnvironmentPage() {
                       value={msEngId === "" ? "" : String(msEngId)}
                       onChange={(e) => setMsEngId(e.target.value ? Number(e.target.value) : "")}
                       SelectProps={{ native: true }}
+                      InputLabelProps={{ shrink: true }}
                       sx={{ width: { xs: "100%", md: 360 } }}
                     >
                       <option value="">Select engagement…</option>
