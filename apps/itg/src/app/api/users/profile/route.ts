@@ -16,6 +16,74 @@ async function getDB(request?: NextRequest): Promise<D1Database | null> {
 
 let ensureIndividualsSchemaPromise: Promise<void> | null = null;
 
+let ensureAgentsSchemaPromise: Promise<void> | null = null;
+async function ensureAgentsSchema(db: D1Database) {
+  if (ensureAgentsSchemaPromise) return ensureAgentsSchemaPromise;
+  ensureAgentsSchemaPromise = (async () => {
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS agents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uaid TEXT UNIQUE,
+        ens_name TEXT,
+        agent_name TEXT,
+        email_domain TEXT,
+        agent_account TEXT,
+        chain_id INTEGER NOT NULL DEFAULT 11155111,
+        session_package TEXT,
+        agent_card_json TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );`,
+    ).run();
+
+    // Add missing columns if table exists but is older.
+    const info = await db.prepare("PRAGMA table_info(agents)").all<{ name: string }>();
+    const existing = new Set((info.results || []).map((c) => c.name));
+    const desired: Array<{ name: string; sql: string }> = [
+      { name: "uaid", sql: "ALTER TABLE agents ADD COLUMN uaid TEXT" },
+      { name: "ens_name", sql: "ALTER TABLE agents ADD COLUMN ens_name TEXT" },
+      { name: "agent_name", sql: "ALTER TABLE agents ADD COLUMN agent_name TEXT" },
+      { name: "email_domain", sql: "ALTER TABLE agents ADD COLUMN email_domain TEXT" },
+      { name: "agent_account", sql: "ALTER TABLE agents ADD COLUMN agent_account TEXT" },
+      { name: "chain_id", sql: "ALTER TABLE agents ADD COLUMN chain_id INTEGER NOT NULL DEFAULT 11155111" },
+      { name: "session_package", sql: "ALTER TABLE agents ADD COLUMN session_package TEXT" },
+      { name: "agent_card_json", sql: "ALTER TABLE agents ADD COLUMN agent_card_json TEXT" },
+      { name: "created_at", sql: "ALTER TABLE agents ADD COLUMN created_at INTEGER NOT NULL DEFAULT (unixepoch())" },
+      { name: "updated_at", sql: "ALTER TABLE agents ADD COLUMN updated_at INTEGER NOT NULL DEFAULT (unixepoch())" },
+    ];
+    for (const col of desired) {
+      if (existing.has(col.name)) continue;
+      try {
+        await db.prepare(col.sql).run();
+      } catch {
+        // ignore
+      }
+    }
+
+    // Indexes (best-effort)
+    try {
+      await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_uaid_unique ON agents(uaid) WHERE uaid IS NOT NULL").run();
+    } catch {
+      // ignore
+    }
+    try {
+      await db.prepare("CREATE INDEX IF NOT EXISTS idx_agents_ens_name ON agents(ens_name)").run();
+    } catch {
+      // ignore
+    }
+  })();
+  return ensureAgentsSchemaPromise;
+}
+
+function deriveEmailDomainFromEns(ensName: string | null | undefined): string | null {
+  if (!ensName) return null;
+  const n = String(ensName).trim().toLowerCase();
+  if (!n.includes(".")) return null;
+  const parts = n.split(".").filter(Boolean);
+  if (parts.length < 2) return null;
+  return parts.slice(-2).join(".");
+}
+
 async function ensureIndividualsSchema(db: D1Database) {
   if (ensureIndividualsSchemaPromise) return ensureIndividualsSchemaPromise;
   ensureIndividualsSchemaPromise = (async () => {
@@ -46,11 +114,8 @@ async function ensureIndividualsSchema(db: D1Database) {
             aa_address TEXT,
             participant_ens_name TEXT,
             participant_agent_name TEXT,
-            participant_agent_account TEXT,
-            participant_agent_id TEXT,
-            participant_chain_id INTEGER,
-            participant_did TEXT,
             participant_uaid TEXT,
+            participant_agent_row_id INTEGER,
             participant_metadata TEXT,
             trust_tier TEXT,
             created_at INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -65,14 +130,15 @@ async function ensureIndividualsSchema(db: D1Database) {
         await db.prepare(
           `INSERT INTO individuals (
             id,email,role,first_name,last_name,social_account_id,social_account_type,eoa_address,aa_address,
-            participant_ens_name,participant_agent_name,participant_agent_account,participant_agent_id,participant_chain_id,participant_did,participant_uaid,
-            participant_metadata,trust_tier,
+            participant_ens_name,participant_agent_name,participant_uaid,
+            participant_agent_row_id,participant_metadata,trust_tier,
             created_at,updated_at
           )
           SELECT
             id,email,NULL as role,first_name,last_name,social_account_id,social_account_type,eoa_address,aa_address,
-            participant_ens_name,participant_agent_name,participant_agent_account,participant_agent_id,participant_chain_id,participant_did,
+            participant_ens_name,participant_agent_name,
             NULL as participant_uaid,
+            NULL as participant_agent_row_id,
             NULL as participant_metadata,
             NULL as trust_tier,
             created_at,updated_at
@@ -92,11 +158,8 @@ async function ensureIndividualsSchema(db: D1Database) {
       { name: "social_display_name", sql: "ALTER TABLE individuals ADD COLUMN social_display_name TEXT" },
       { name: "participant_ens_name", sql: "ALTER TABLE individuals ADD COLUMN participant_ens_name TEXT" },
       { name: "participant_agent_name", sql: "ALTER TABLE individuals ADD COLUMN participant_agent_name TEXT" },
-      { name: "participant_agent_account", sql: "ALTER TABLE individuals ADD COLUMN participant_agent_account TEXT" },
-      { name: "participant_agent_id", sql: "ALTER TABLE individuals ADD COLUMN participant_agent_id TEXT" },
-      { name: "participant_chain_id", sql: "ALTER TABLE individuals ADD COLUMN participant_chain_id INTEGER" },
-      { name: "participant_did", sql: "ALTER TABLE individuals ADD COLUMN participant_did TEXT" },
       { name: "participant_uaid", sql: "ALTER TABLE individuals ADD COLUMN participant_uaid TEXT" },
+      { name: "participant_agent_row_id", sql: "ALTER TABLE individuals ADD COLUMN participant_agent_row_id INTEGER" },
       { name: "participant_metadata", sql: "ALTER TABLE individuals ADD COLUMN participant_metadata TEXT" },
       { name: "trust_tier", sql: "ALTER TABLE individuals ADD COLUMN trust_tier TEXT" },
     ];
@@ -209,10 +272,6 @@ export async function POST(request: NextRequest) {
       aa_address,
       participant_ens_name,
       participant_agent_name,
-      participant_agent_account,
-      participant_agent_id,
-      participant_chain_id,
-      participant_did,
       participant_uaid,
       participant_metadata,
       trust_tier,
@@ -249,6 +308,7 @@ export async function POST(request: NextRequest) {
       );
     }
     console.log('[users/profile] Database connection obtained');
+    await ensureAgentsSchema(db);
     await ensureIndividualsSchema(db);
 
     // Check if profile exists
@@ -281,6 +341,80 @@ export async function POST(request: NextRequest) {
     const now = Math.floor(Date.now() / 1000);
     console.log('[users/profile] Profile exists:', !!existing);
 
+    // Best-effort upsert participant agent row into agents table, returning agents.id.
+    let participantAgentRowId: number | null = null;
+    try {
+      const ensName = typeof participant_ens_name === "string" ? participant_ens_name : null;
+      const agentName = typeof participant_agent_name === "string" ? participant_agent_name : null;
+      const uaid = typeof participant_uaid === "string" ? participant_uaid : null;
+
+      const parsed = (() => {
+        if (!uaid) return { chainId: null as number | null, agentAccount: null as string | null };
+        const m = uaid.match(/did:ethr:(\d+):(0x[a-fA-F0-9]{40})/);
+        if (!m) return { chainId: null as number | null, agentAccount: null as string | null };
+        const chainId = Number.parseInt(m[1], 10);
+        const agentAccount = String(m[2]).toLowerCase();
+        return {
+          chainId: Number.isFinite(chainId) ? chainId : null,
+          agentAccount: /^0x[a-f0-9]{40}$/.test(agentAccount) ? agentAccount : null,
+        };
+      })();
+
+      const emailDomain =
+        (typeof cleanedEmail === "string" && cleanedEmail.includes("@") ? cleanedEmail.split("@")[1]?.toLowerCase() : null) ??
+        deriveEmailDomainFromEns(ensName) ??
+        null;
+
+      // We only key participant agent identity by UAID.
+      if (uaid) {
+        const existingAgent = await db.prepare("SELECT id FROM agents WHERE uaid = ?").bind(uaid).first<{ id: number }>();
+
+        if (existingAgent?.id) {
+          await db.prepare(
+            `UPDATE agents
+             SET uaid = COALESCE(?, uaid),
+                 ens_name = COALESCE(?, ens_name),
+                 agent_name = COALESCE(?, agent_name),
+                 email_domain = COALESCE(?, email_domain),
+                 agent_account = COALESCE(?, agent_account),
+                 chain_id = COALESCE(?, chain_id),
+                 agent_card_json = COALESCE(?, agent_card_json),
+                 updated_at = ?
+             WHERE id = ?`,
+          ).bind(
+            uaid,
+            ensName,
+            agentName,
+            emailDomain,
+            parsed.agentAccount,
+            parsed.chainId,
+            null,
+            now,
+            existingAgent.id,
+          ).run();
+          participantAgentRowId = existingAgent.id;
+        } else {
+          const ins = await db.prepare(
+            `INSERT INTO agents
+             (uaid, ens_name, agent_name, email_domain, agent_account, chain_id, session_package, agent_card_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, COALESCE(?, 11155111), NULL, NULL, ?, ?)`,
+          ).bind(
+            uaid,
+            ensName,
+            agentName,
+            emailDomain,
+            parsed.agentAccount,
+            parsed.chainId,
+            now,
+            now,
+          ).run();
+          participantAgentRowId = Number(ins.meta.last_row_id);
+        }
+      }
+    } catch (e) {
+      console.warn("[users/profile] Failed to upsert participant agent into agents table:", e);
+    }
+
     if (existing) {
       // Update existing profile
       console.log('[users/profile] Updating existing profile');
@@ -298,11 +432,8 @@ export async function POST(request: NextRequest) {
              aa_address = COALESCE(?, aa_address),
              participant_ens_name = COALESCE(?, participant_ens_name),
              participant_agent_name = COALESCE(?, participant_agent_name),
-             participant_agent_account = COALESCE(?, participant_agent_account),
-             participant_agent_id = COALESCE(?, participant_agent_id),
-             participant_chain_id = COALESCE(?, participant_chain_id),
-             participant_did = COALESCE(?, participant_did),
              participant_uaid = COALESCE(?, participant_uaid),
+             participant_agent_row_id = COALESCE(?, participant_agent_row_id),
              participant_metadata = COALESCE(?, participant_metadata),
              trust_tier = COALESCE(?, trust_tier),
              updated_at = ?
@@ -320,11 +451,8 @@ export async function POST(request: NextRequest) {
         typeof aa_address === "string" ? aa_address : null,
         typeof participant_ens_name === "string" ? participant_ens_name : null,
         typeof participant_agent_name === "string" ? participant_agent_name : null,
-        typeof participant_agent_account === "string" ? participant_agent_account : null,
-        typeof participant_agent_id === "string" ? participant_agent_id : null,
-        typeof participant_chain_id === "number" ? participant_chain_id : null,
-        typeof participant_did === "string" ? participant_did : null,
         typeof participant_uaid === "string" ? participant_uaid : null,
+        participantAgentRowId,
         typeof participant_metadata === "string" ? participant_metadata : null,
         typeof trust_tier === "string" ? trust_tier : null,
         now,
@@ -338,11 +466,10 @@ export async function POST(request: NextRequest) {
         `INSERT INTO individuals 
          (email, role, first_name, last_name, phone_number, social_display_name, social_account_id, social_account_type, 
           eoa_address, aa_address,
-          participant_ens_name, participant_agent_name, participant_agent_account,
-          participant_agent_id, participant_chain_id, participant_did, participant_uaid,
-          participant_metadata, trust_tier,
+          participant_ens_name, participant_agent_name, participant_uaid,
+          participant_agent_row_id, participant_metadata, trust_tier,
           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         effectiveEmail,
         typeof role === "string" ? role : null,
@@ -356,11 +483,8 @@ export async function POST(request: NextRequest) {
         aa_address || null,
         participant_ens_name || null,
         participant_agent_name || null,
-        participant_agent_account || null,
-        participant_agent_id || null,
-        participant_chain_id || null,
-        participant_did || null,
         participant_uaid || null,
+        participantAgentRowId,
         typeof participant_metadata === "string" ? participant_metadata : null,
         typeof trust_tier === "string" ? trust_tier : null,
         now,

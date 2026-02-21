@@ -149,10 +149,7 @@ export default function OnboardingPage() {
   // Participant agent (created for the individual onboarding)
   const [participantAgentName, setParticipantAgentName] = React.useState<string>("");
   const [isCreatingParticipant, setIsCreatingParticipant] = React.useState(false);
-  const [participantAgentAccount, setParticipantAgentAccount] = React.useState<string | null>(null);
   const [participantEnsName, setParticipantEnsName] = React.useState<string | null>(null);
-  const [participantAgentDid, setParticipantAgentDid] = React.useState<string | null>(null);
-  const [participantAgentId, setParticipantAgentId] = React.useState<string | null>(null);
   const [participantUaid, setParticipantUaid] = React.useState<string | null>(null);
   const [participantEnsAvailability, setParticipantEnsAvailability] = React.useState<{
     checking: boolean;
@@ -419,22 +416,14 @@ export default function OnboardingPage() {
         }
 
         // If participant agent already exists, hydrate it early so Step 3 can continue immediately.
-        if (typeof profile.participant_did === "string" && profile.participant_did) {
-          const participantDid = profile.participant_did;
-          setParticipantAgentDid((prev) => prev ?? participantDid);
-
+        if (typeof profile.participant_uaid === "string" && profile.participant_uaid) {
+          setParticipantUaid((prev) => prev ?? profile.participant_uaid);
           if (typeof profile.participant_agent_name === "string") {
             const participantName = profile.participant_agent_name;
             setParticipantAgentName((prev) => (prev.trim() ? prev : participantName || ""));
           }
           setParticipantEnsName((prev) =>
             prev ?? (typeof profile.participant_ens_name === "string" ? profile.participant_ens_name : null),
-          );
-          setParticipantAgentAccount((prev) =>
-            prev ?? (typeof profile.participant_agent_account === "string" ? profile.participant_agent_account : null),
-          );
-          setParticipantAgentId((prev) =>
-            prev ?? (typeof profile.participant_agent_id === "string" ? profile.participant_agent_id : null),
           );
         }
 
@@ -509,8 +498,8 @@ export default function OnboardingPage() {
         : "";
     const hasNames = !!dbFirst || !!dbLast;
     const hasParticipant =
-      typeof (existingIndividualProfile as any).participant_did === "string" &&
-      !!(existingIndividualProfile as any).participant_did;
+      typeof (existingIndividualProfile as any).participant_uaid === "string" &&
+      !!(existingIndividualProfile as any).participant_uaid;
 
     // If we already have everything for steps 2-3, jump to org step.
     if (hasNames && hasParticipant) {
@@ -553,11 +542,6 @@ export default function OnboardingPage() {
           setParticipantAgentName(profile.participant_agent_name);
         }
         setParticipantEnsName(typeof profile.participant_ens_name === "string" ? profile.participant_ens_name : null);
-        setParticipantAgentAccount(
-          typeof profile.participant_agent_account === "string" ? profile.participant_agent_account : null,
-        );
-        setParticipantAgentId(typeof profile.participant_agent_id === "string" ? profile.participant_agent_id : null);
-        setParticipantAgentDid(typeof profile.participant_did === "string" ? profile.participant_did : null);
         setParticipantUaid(typeof profile.participant_uaid === "string" ? profile.participant_uaid : null);
 
         // If we already have an ENS name from the DB, stop any "checking" UI flicker.
@@ -586,7 +570,7 @@ export default function OnboardingPage() {
     }
 
     // If participant agent is already present (loaded from DB or created now), don't re-check.
-    if (participantAgentDid) {
+    if (participantUaid) {
       const ens = participantEnsName ?? null;
       setParticipantEnsAvailability({ checking: false, available: null, ensName: ens });
       return;
@@ -984,11 +968,7 @@ export default function OnboardingPage() {
         throw new Error("Participant agent creation did not return an agentId");
       }
 
-      const did8004 = `did:8004:${sepolia.id}:${String(createdAgentId)}`;
-      setParticipantAgentAccount(agentAccountAddress);
       setParticipantEnsName(ensName);
-      setParticipantAgentDid(did8004);
-      setParticipantAgentId(String(createdAgentId));
 
       // Generate UAID for the participant smart account (admin-compatible endpoint).
       let createdUaid: string | null = null;
@@ -1026,10 +1006,6 @@ export default function OnboardingPage() {
         aa_address: aaAddress || null,
         participant_ens_name: ensName,
         participant_agent_name: agentName,
-        participant_agent_account: agentAccountAddress,
-        participant_agent_id: String(createdAgentId),
-        participant_chain_id: sepolia.id,
-        participant_did: did8004,
         participant_uaid: createdUaid,
         participant_metadata: (() => {
           const participantMeta: Record<string, any> = {};
@@ -2028,7 +2004,7 @@ export default function OnboardingPage() {
             </div>
           </div>
 
-          {participantAgentDid && (
+          {participantUaid && (
             <div
               style={{
                 padding: "1rem",
@@ -2042,16 +2018,11 @@ export default function OnboardingPage() {
               <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>Participant agent created</div>
               <div style={{ fontSize: "0.85rem", color: "#14532d" }}>
                 <div>
-                  <strong>DID:</strong> {participantAgentDid}
+                  <strong>UAID:</strong> {participantUaid}
                 </div>
                 {participantEnsName && (
                   <div>
                     <strong>ENS:</strong> {participantEnsName}
-                  </div>
-                )}
-                {participantAgentAccount && (
-                  <div>
-                    <strong>Agent AA:</strong> {participantAgentAccount}
                   </div>
                 )}
               </div>
@@ -2080,7 +2051,7 @@ export default function OnboardingPage() {
               Back
             </button>
             <div style={{ display: "flex", gap: "0.75rem" }}>
-              {!participantAgentDid &&
+              {!participantUaid &&
                 !participantEnsAvailability.checking &&
                 participantEnsAvailability.available === true &&
                 isValidAgentName(normalizedParticipantAgentName) && (
@@ -2104,16 +2075,16 @@ export default function OnboardingPage() {
               <button
                 type="button"
                 onClick={() => setStep(4)}
-                disabled={!participantAgentDid}
+                disabled={!participantUaid}
                 style={{
                   padding: "0.5rem 1.25rem",
                   borderRadius: "9999px",
                   border: "none",
-                  backgroundColor: participantAgentDid ? "#2563eb" : "#9ca3af",
+                  backgroundColor: participantUaid ? "#2563eb" : "#9ca3af",
                   color: "white",
                   fontWeight: 600,
-                  cursor: participantAgentDid ? "pointer" : "not-allowed",
-                  opacity: participantAgentDid ? 1 : 0.7,
+                  cursor: participantUaid ? "pointer" : "not-allowed",
+                  opacity: participantUaid ? 1 : 0.7,
                 }}
               >
                 Continue
@@ -2926,7 +2897,7 @@ export default function OnboardingPage() {
             Your participant agent has been created and saved to your profile.
           </p>
 
-          {participantAgentDid && (
+          {participantUaid && (
             <div
               style={{
                 padding: "0.85rem 1rem",
@@ -2937,7 +2908,7 @@ export default function OnboardingPage() {
                 marginBottom: "1rem",
               }}
             >
-              {participantAgentDid}
+              {participantUaid}
             </div>
           )}
 

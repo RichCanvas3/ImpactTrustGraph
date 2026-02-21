@@ -4,6 +4,7 @@
  */
 
 export interface UserProfile {
+  id?: number; // individuals.id
   email?: string | null;
   role?: string | null;
   first_name?: string | null;
@@ -16,11 +17,8 @@ export interface UserProfile {
   aa_address?: string | null;
   participant_ens_name?: string | null;
   participant_agent_name?: string | null;
-  participant_agent_account?: string | null;
-  participant_agent_id?: string | null;
-  participant_chain_id?: number | null;
-  participant_did?: string | null;
   participant_uaid?: string | null;
+  participant_agent_row_id?: number | null;
   participant_metadata?: string | null; // JSON string
   trust_tier?: string | null;
 }
@@ -36,6 +34,7 @@ export function getPreferredIndividualDisplayName(profile: UserProfile | null | 
 }
 
 export interface OrganizationAssociation {
+  id?: number; // organizations.id (when fetched by EOA/email)
   ens_name: string;
   agent_name: string;
   org_name?: string;
@@ -44,6 +43,9 @@ export interface OrganizationAssociation {
   email_domain: string;
   agent_account?: string;
   uaid?: string | null;
+  agent_row_id?: number | null;
+  session_package?: string | null;
+  agent_card_json?: string | null;
   org_metadata?: string | null; // JSON string
   chain_id?: number;
   is_primary?: boolean;
@@ -68,10 +70,6 @@ export async function saveUserProfile(profile: UserProfile): Promise<UserProfile
     aa_address: profile.aa_address ?? undefined,
     participant_ens_name: profile.participant_ens_name ?? undefined,
     participant_agent_name: profile.participant_agent_name ?? undefined,
-    participant_agent_account: profile.participant_agent_account ?? undefined,
-    participant_agent_id: profile.participant_agent_id ?? undefined,
-    participant_chain_id: profile.participant_chain_id ?? undefined,
-    participant_did: profile.participant_did ?? undefined,
     participant_uaid: profile.participant_uaid ?? undefined,
     participant_metadata: profile.participant_metadata ?? undefined,
     trust_tier: profile.trust_tier ?? undefined,

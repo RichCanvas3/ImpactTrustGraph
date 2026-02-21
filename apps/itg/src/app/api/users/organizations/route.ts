@@ -26,6 +26,20 @@ async function ensureOrganizationsSchema(db: D1Database) {
         // ignore
       }
     }
+    if (!existing.has("agent_row_id")) {
+      try {
+        await db.prepare("ALTER TABLE organizations ADD COLUMN agent_row_id INTEGER").run();
+      } catch {
+        // ignore
+      }
+    }
+    if (!existing.has("session_package")) {
+      try {
+        await db.prepare("ALTER TABLE organizations ADD COLUMN session_package TEXT").run();
+      } catch {
+        // ignore
+      }
+    }
     if (!existing.has("org_metadata")) {
       try {
         await db.prepare("ALTER TABLE organizations ADD COLUMN org_metadata TEXT").run();
@@ -35,6 +49,34 @@ async function ensureOrganizationsSchema(db: D1Database) {
     }
   })();
   return ensureOrganizationsSchemaPromise;
+}
+
+let ensureAgentsSchemaPromise: Promise<void> | null = null;
+async function ensureAgentsSchema(db: D1Database) {
+  if (ensureAgentsSchemaPromise) return ensureAgentsSchemaPromise;
+  ensureAgentsSchemaPromise = (async () => {
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS agents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uaid TEXT UNIQUE,
+        ens_name TEXT,
+        agent_name TEXT,
+        email_domain TEXT,
+        agent_account TEXT,
+        chain_id INTEGER NOT NULL DEFAULT 11155111,
+        session_package TEXT,
+        agent_card_json TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );`,
+    ).run();
+    try {
+      await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_uaid_unique ON agents(uaid) WHERE uaid IS NOT NULL").run();
+    } catch {
+      // ignore
+    }
+  })();
+  return ensureAgentsSchemaPromise;
 }
 
 export async function GET(request: NextRequest) {
@@ -106,12 +148,14 @@ export async function GET(request: NextRequest) {
       org_type: string | null;
       email_domain: string;
       agent_account: string | null;
+      agent_card_json?: string | null;
       chain_id: number;
       is_primary: number; // SQLite stores boolean as 0/1
       role: string | null;
     }>();
 
     const organizations = (associations.results || []).map((row) => ({
+      id: row.id,
       ens_name: row.ens_name,
       agent_name: row.agent_name,
       org_name: row.org_name,
@@ -120,6 +164,9 @@ export async function GET(request: NextRequest) {
       email_domain: row.email_domain,
       agent_account: row.agent_account,
       uaid: (row as any).uaid ?? null,
+      agent_row_id: (row as any).agent_row_id ?? null,
+      session_package: (row as any).session_package ?? null,
+      agent_card_json: (row as any).agent_card_json ?? null,
       org_metadata: (row as any).org_metadata ?? null,
       chain_id: row.chain_id,
       is_primary: row.is_primary === 1,
@@ -154,6 +201,8 @@ export async function POST(request: NextRequest) {
       email_domain,
       agent_account,
       uaid,
+      session_package,
+      agent_card_json,
       org_metadata,
       chain_id,
       is_primary,
@@ -193,6 +242,7 @@ export async function POST(request: NextRequest) {
       );
     }
     console.log('[users/organizations] Database connection obtained');
+    await ensureAgentsSchema(db);
     await ensureOrganizationsSchema(db);
 
     // Get or create individual
@@ -219,12 +269,67 @@ export async function POST(request: NextRequest) {
       // Create organization if it doesn't exist
       const now = Math.floor(Date.now() / 1000);
       const resolvedChainId = chain_id || 11155111;
+
+      // Upsert canonical agents row (best-effort) and capture id for FK.
+      let agentRowId: number | null = null;
+      try {
+        const existingAgent = typeof uaid === "string" && uaid
+          ? await db.prepare("SELECT id FROM agents WHERE uaid = ?").bind(uaid).first<{ id: number }>()
+          : await db.prepare("SELECT id FROM agents WHERE ens_name = ? AND chain_id = ?").bind(ens_name, resolvedChainId).first<{ id: number }>();
+        if (existingAgent?.id) {
+          await db.prepare(
+            `UPDATE agents
+             SET uaid = COALESCE(?, uaid),
+                 ens_name = COALESCE(?, ens_name),
+                 agent_name = COALESCE(?, agent_name),
+                 email_domain = COALESCE(?, email_domain),
+                 agent_account = COALESCE(?, agent_account),
+                 chain_id = COALESCE(?, chain_id),
+                 session_package = COALESCE(?, session_package),
+                 agent_card_json = COALESCE(?, agent_card_json),
+                 updated_at = ?
+             WHERE id = ?`,
+          ).bind(
+            typeof uaid === "string" ? uaid : null,
+            ens_name,
+            agent_name,
+            email_domain,
+            agent_account || null,
+            resolvedChainId,
+            typeof session_package === "string" ? session_package : null,
+            typeof agent_card_json === "string" ? agent_card_json : null,
+            now,
+            existingAgent.id,
+          ).run();
+          agentRowId = existingAgent.id;
+        } else {
+          const ins = await db.prepare(
+            `INSERT INTO agents
+             (uaid, ens_name, agent_name, email_domain, agent_account, chain_id, session_package, agent_card_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).bind(
+            typeof uaid === "string" ? uaid : null,
+            ens_name,
+            agent_name,
+            email_domain,
+            agent_account || null,
+            resolvedChainId,
+            typeof session_package === "string" ? session_package : null,
+            typeof agent_card_json === "string" ? agent_card_json : null,
+            now,
+            now,
+          ).run();
+          agentRowId = Number(ins.meta.last_row_id);
+        }
+      } catch (e) {
+        console.warn("[users/organizations] Failed to upsert agents row:", e);
+      }
       
       const insertResult = await db.prepare(
         `INSERT INTO organizations 
          (ens_name, agent_name, org_name, org_address, org_type, email_domain, 
-          agent_account, uaid, chain_id, org_metadata, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          agent_account, uaid, agent_row_id, chain_id, session_package, org_metadata, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         ens_name,
         agent_name,
@@ -234,7 +339,9 @@ export async function POST(request: NextRequest) {
         email_domain,
         agent_account || null,
         typeof uaid === "string" ? uaid : null,
+        agentRowId,
         resolvedChainId,
+        typeof session_package === "string" ? session_package : null,
         typeof org_metadata === "string" ? org_metadata : null,
         now,
         now
@@ -244,10 +351,69 @@ export async function POST(request: NextRequest) {
     } else {
       // Update organization if it exists
       const now = Math.floor(Date.now() / 1000);
+
+      // Upsert canonical agents row (best-effort) and capture id for FK.
+      let agentRowId: number | null = null;
+      try {
+        const resolvedChainId = chain_id || 11155111;
+        const existingAgent = typeof uaid === "string" && uaid
+          ? await db.prepare("SELECT id FROM agents WHERE uaid = ?").bind(uaid).first<{ id: number }>()
+          : await db.prepare("SELECT id FROM agents WHERE ens_name = ? AND chain_id = ?").bind(ens_name, resolvedChainId).first<{ id: number }>();
+        if (existingAgent?.id) {
+          await db.prepare(
+            `UPDATE agents
+             SET uaid = COALESCE(?, uaid),
+                 ens_name = COALESCE(?, ens_name),
+                 agent_name = COALESCE(?, agent_name),
+                 email_domain = COALESCE(?, email_domain),
+                 agent_account = COALESCE(?, agent_account),
+                 chain_id = COALESCE(?, chain_id),
+                 session_package = COALESCE(?, session_package),
+                 agent_card_json = COALESCE(?, agent_card_json),
+                 updated_at = ?
+             WHERE id = ?`,
+          ).bind(
+            typeof uaid === "string" ? uaid : null,
+            ens_name,
+            agent_name,
+            email_domain,
+            agent_account || null,
+            resolvedChainId,
+            typeof session_package === "string" ? session_package : null,
+            typeof agent_card_json === "string" ? agent_card_json : null,
+            now,
+            existingAgent.id,
+          ).run();
+          agentRowId = existingAgent.id;
+        } else {
+          const ins = await db.prepare(
+            `INSERT INTO agents
+             (uaid, ens_name, agent_name, email_domain, agent_account, chain_id, session_package, agent_card_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).bind(
+            typeof uaid === "string" ? uaid : null,
+            ens_name,
+            agent_name,
+            email_domain,
+            agent_account || null,
+            resolvedChainId,
+            typeof session_package === "string" ? session_package : null,
+            typeof agent_card_json === "string" ? agent_card_json : null,
+            now,
+            now,
+          ).run();
+          agentRowId = Number(ins.meta.last_row_id);
+        }
+      } catch (e) {
+        console.warn("[users/organizations] Failed to upsert agents row (update):", e);
+      }
+
       await db.prepare(
         `UPDATE organizations 
          SET agent_name = ?, org_name = ?, org_address = ?, org_type = ?, 
-             agent_account = ?, uaid = COALESCE(?, uaid), org_metadata = COALESCE(?, org_metadata), updated_at = ?
+             agent_account = ?, uaid = COALESCE(?, uaid), agent_row_id = COALESCE(?, agent_row_id),
+             session_package = COALESCE(?, session_package),
+             org_metadata = COALESCE(?, org_metadata), updated_at = ?
          WHERE ens_name = ?`
       ).bind(
         agent_name,
@@ -256,6 +422,8 @@ export async function POST(request: NextRequest) {
         org_type || null,
         agent_account || null,
         typeof uaid === "string" ? uaid : null,
+        agentRowId,
+        typeof session_package === "string" ? session_package : null,
         typeof org_metadata === "string" ? org_metadata : null,
         now,
         ens_name

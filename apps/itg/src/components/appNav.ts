@@ -82,7 +82,7 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
     id: "org",
     label: "Organization Tools",
     items: [
-      { id: "org-settings", label: "⚙️ Organization Settings", roles: ["org_admin"] },
+      { id: "org-settings", label: "⚙️ Organization Settings", roles: ["org_admin"], href: "/organization-settings" },
       { id: "team-management", label: "👤 Team Management", roles: ["org_admin"] },
       { id: "budget-allocations", label: "💵 Budget & Allocations", roles: ["org_admin"] },
       { id: "agent-configuration", label: "🤖 Agent Configuration", roles: ["org_admin"] },

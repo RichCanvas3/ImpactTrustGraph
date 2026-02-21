@@ -60,6 +60,7 @@ function titleForPath(pathname: string, viewParam: string | null): string {
   if (pathname === "/dashboard") return "Dashboard";
   if (pathname === "/agents") return "Agent Registry";
   if (pathname === "/messages") return "Messages";
+  if (pathname === "/organization-settings") return "Organization Settings";
   if (pathname === "/profile") return "Profile";
   if (pathname === "/app") {
     if (!viewParam) return "Workspace";
