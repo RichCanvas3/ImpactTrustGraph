@@ -5,7 +5,7 @@ import type { D1Database } from '../../../../lib/db';
 import { getD1Database } from '../../../../lib/d1-wrapper';
 
 /**
- * GET /api/users/profile?email=... or ?eoa=...
+ * GET /api/users/profile?individualId=... or ?eoa=... or ?email=...
  * POST /api/users/profile - Create or update user profile
  */
 // Access database from Cloudflare runtime context or Wrangler CLI
@@ -180,12 +180,13 @@ export async function GET(request: NextRequest) {
   try {
     console.log('[users/profile] GET request received');
     const searchParams = request.nextUrl.searchParams;
+    const individualIdParam = searchParams.get('individualId') ?? searchParams.get('individual_id');
     const email = searchParams.get('email');
     const eoa = searchParams.get('eoa') ?? searchParams.get('eoa_address');
 
-    if (!email && !eoa) {
+    if (!individualIdParam && !email && !eoa) {
       return NextResponse.json(
-        { error: 'Either email or eoa parameter is required' },
+        { error: 'Either individualId, email, or eoa parameter is required' },
         { status: 400 }
       );
     }
@@ -213,13 +214,18 @@ export async function GET(request: NextRequest) {
 
     await ensureIndividualsSchema(db);
 
+    const individualId = individualIdParam && /^\d+$/.test(String(individualIdParam).trim())
+      ? Number.parseInt(String(individualIdParam).trim(), 10)
+      : null;
     const cleanedEmail =
       typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
     const cleanedEoa =
       typeof eoa === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa) ? eoa.toLowerCase() : null;
 
     let profile;
-    if (cleanedEoa) {
+    if (typeof individualId === "number" && individualId > 0) {
+      profile = await db.prepare('SELECT * FROM individuals WHERE id = ?').bind(individualId).first();
+    } else if (cleanedEoa) {
       profile = await db
         .prepare('SELECT * FROM individuals WHERE lower(eoa_address) = ?')
         .bind(cleanedEoa)

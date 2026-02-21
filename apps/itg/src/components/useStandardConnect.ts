@@ -93,7 +93,7 @@ export function useStandardConnect() {
                     ...agentData,
                   };
 
-                  setDefaultOrgAgent(defaultAgent, email ?? undefined);
+                  setDefaultOrgAgent(defaultAgent);
                 }
               }
             }
@@ -109,7 +109,7 @@ export function useStandardConnect() {
           agentName: org.agent_name,
           agentAccount: org.agent_account || "",
           chainId: org.chain_id || sepolia.id,
-        }, email ?? undefined);
+        });
       }
     }
   }, [setDefaultOrgAgent]);
@@ -363,7 +363,7 @@ export function useStandardConnect() {
 
                           // Pass email directly to ensure localStorage is saved even if user context isn't ready
                           console.info("[useStandardConnect] Setting default org agent with email:", cleanedEmail || "none");
-                          setDefaultOrgAgent(defaultAgent, cleanedEmail ?? undefined);
+                          setDefaultOrgAgent(defaultAgent);
                           console.info("[useStandardConnect] Default org agent set, DID:", defaultAgent.did);
 
                           // Long-term cache of full agent details by DID, so
@@ -644,7 +644,7 @@ export function useStandardConnect() {
       agentId: fullAgent.agentId,
       did: fullAgent.did,
     });
-    setDefaultOrgAgent(fullAgent, email ?? undefined);
+    setDefaultOrgAgent(fullAgent);
     
     // Update user profile (skip setting default agent since we already set it above)
     if (pendingIndivAaAddress) {

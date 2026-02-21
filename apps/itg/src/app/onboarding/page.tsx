@@ -417,7 +417,7 @@ export default function OnboardingPage() {
 
         // If participant agent already exists, hydrate it early so Step 3 can continue immediately.
         if (typeof profile.participant_uaid === "string" && profile.participant_uaid) {
-          setParticipantUaid((prev) => prev ?? profile.participant_uaid);
+          setParticipantUaid((prev) => prev ?? profile.participant_uaid ?? null);
           if (typeof profile.participant_agent_name === "string") {
             const participantName = profile.participant_agent_name;
             setParticipantAgentName((prev) => (prev.trim() ? prev : participantName || ""));
@@ -868,7 +868,7 @@ export default function OnboardingPage() {
         console.warn("[onboarding] Failed to persist org association:", e);
       }
 
-      setDefaultOrgAgent(defaultAgent, userEmail ?? undefined);
+      setDefaultOrgAgent(defaultAgent);
       setItg(ensName);
       setStep(6);
     },
@@ -1515,7 +1515,7 @@ export default function OnboardingPage() {
           });
           
           // Pass email directly to ensure localStorage is saved
-          setDefaultOrgAgent(defaultAgent, userEmail ?? undefined);
+          setDefaultOrgAgent(defaultAgent);
           
           // Wait a moment to ensure state is saved before any navigation
           await new Promise((resolve) => setTimeout(resolve, 200));
@@ -1577,7 +1577,7 @@ export default function OnboardingPage() {
           onSelect={(agent) => {
             setShowOrgConnectSelector(false);
             if (user?.email) {
-              setDefaultOrgAgent(agent, user.email);
+              setDefaultOrgAgent(agent);
             } else {
               setDefaultOrgAgent(agent);
             }

@@ -173,6 +173,27 @@ export async function ensureInitiativesSchema(db: D1Database) {
     await idx("CREATE INDEX IF NOT EXISTS idx_milestones_status ON milestones(status)");
     await idx("CREATE INDEX IF NOT EXISTS idx_attestations_initiative ON attestations(initiative_id, created_at)");
     await idx("CREATE INDEX IF NOT EXISTS idx_attestations_type ON attestations(attestation_type, created_at)");
+
+    // Migrate initiatives: add created_by_individual_id if missing (legacy DBs)
+    try {
+      const info = await db.prepare("PRAGMA table_info(initiatives)").all<{ name: string }>();
+      const names = new Set((info.results || []).map((c) => c.name));
+      if (!names.has("created_by_individual_id")) {
+        await db.prepare("ALTER TABLE initiatives ADD COLUMN created_by_individual_id INTEGER").run();
+      }
+      // Backfill: set creator from steward participant where NULL
+      await db
+        .prepare(
+          `UPDATE initiatives SET created_by_individual_id = (
+            SELECT individual_id FROM initiative_participants
+            WHERE initiative_id = initiatives.id AND participant_kind = 'individual' AND role = 'steward' AND individual_id IS NOT NULL
+            LIMIT 1
+          ) WHERE created_by_individual_id IS NULL`,
+        )
+        .run();
+    } catch {
+      // ignore
+    }
   })();
   return ensureInitiativesSchemaPromise;
 }

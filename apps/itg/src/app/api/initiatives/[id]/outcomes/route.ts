@@ -1,16 +1,11 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { ensureInitiativesSchema, emitAttestation, getDB, resolveIndividualIdByEoa } from "../../_db";
+import { ensureInitiativesSchema, emitAttestation, getDB } from "../../_db";
 
 function parseId(raw: string): number | null {
   const n = Number.parseInt(String(raw || ""), 10);
   return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function cleanEoa(raw: unknown): string | null {
-  const v = typeof raw === "string" ? raw.trim() : "";
-  return /^0x[a-fA-F0-9]{40}$/.test(v) ? v.toLowerCase() : null;
 }
 
 export async function POST(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -20,7 +15,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     if (!initiativeId) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     const body = await request.json().catch(() => ({}));
-    const { title, metric_json, status, actor_individual_id, actor_eoa } = body || {};
+    const { title, metric_json, status, actor_individual_id } = body || {};
     if (!title || typeof title !== "string" || !title.trim()) {
       return NextResponse.json({ error: "title is required" }, { status: 400 });
     }
@@ -50,9 +45,11 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
       .run();
 
     const outcomeId = Number(ins.meta.last_row_id);
-    const eoa = cleanEoa(actor_eoa);
     const actorIndividualId =
-      typeof actor_individual_id === "number" ? actor_individual_id : eoa ? await resolveIndividualIdByEoa(db, eoa) : null;
+      typeof actor_individual_id === "number" && actor_individual_id > 0 ? actor_individual_id : null;
+    if (!actorIndividualId) {
+      return NextResponse.json({ error: "actor_individual_id is required (number > 0)" }, { status: 400 });
+    }
     await emitAttestation(db, {
       attestation_type: "initiative.outcome.created",
       payload: { title: title.trim() },

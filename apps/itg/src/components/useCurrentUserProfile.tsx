@@ -15,6 +15,7 @@ interface CurrentUserProfileContextValue {
   profile: UserProfile | null;
   role: AppRole | null;
   loading: boolean;
+  hasHydrated: boolean;
   refresh: () => Promise<void>;
   setRole: (role: AppRole) => Promise<void>;
 }
@@ -28,13 +29,17 @@ export function CurrentUserProfileProvider({ children }: { children: React.React
   const [walletAddress, setWalletAddress] = React.useState<string | null>(null);
   const [profile, setProfile] = React.useState<UserProfile | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [hasHydrated, setHasHydrated] = React.useState(false);
 
+  const hydrateRef = React.useRef<string | null>(null);
   const fetchedWalletRef = React.useRef(false);
   React.useEffect(() => {
     if (!user || !web3auth?.provider) {
       fetchedWalletRef.current = false;
       setWalletAddress(null);
       setProfile(null);
+      setHasHydrated(false);
+      hydrateRef.current = null;
       return;
     }
     if (fetchedWalletRef.current) return;
@@ -57,15 +62,26 @@ export function CurrentUserProfileProvider({ children }: { children: React.React
     })();
   }, [user, web3auth]);
 
-  const hydrateRef = React.useRef<string | null>(null);
   const refresh = React.useCallback(async () => {
     if (!walletAddress) return;
     const eoa = walletAddress.toLowerCase();
     setLoading(true);
     try {
       const prof = await getUserProfile(undefined, eoa);
-      setProfile(prof);
+      if (!prof) {
+        setProfile(null);
+        return;
+      }
+      const raw = (prof as any).id;
+      const n =
+        typeof raw === "number" && Number.isFinite(raw) && raw > 0
+          ? raw
+          : typeof raw === "string"
+            ? Number.parseInt(raw, 10)
+            : NaN;
+      setProfile(Number.isFinite(n) && n > 0 ? ({ ...(prof as any), id: n } as any) : (prof as any));
     } finally {
+      setHasHydrated(true);
       setLoading(false);
     }
   }, [walletAddress]);
@@ -73,12 +89,14 @@ export function CurrentUserProfileProvider({ children }: { children: React.React
   React.useEffect(() => {
     if (!walletAddress) return;
     const eoa = walletAddress.toLowerCase();
-    if (hydrateRef.current === eoa) return;
+    // If we haven't hydrated yet, always attempt refresh (even if EOA matches a previous session),
+    // otherwise a reconnect can get stuck in "Loading profile…" with a stale hydrateRef.
+    if (hydrateRef.current === eoa && hasHydrated) return;
     hydrateRef.current = eoa;
     void refresh().catch((e) => {
       console.warn("[CurrentUserProfile] Failed to hydrate profile:", e);
     });
-  }, [walletAddress, refresh]);
+  }, [walletAddress, refresh, hasHydrated]);
 
   const role = React.useMemo<AppRole | null>(() => {
     if (profile) {
@@ -108,8 +126,8 @@ export function CurrentUserProfileProvider({ children }: { children: React.React
   );
 
   const value = React.useMemo(
-    () => ({ walletAddress, profile, role, loading, refresh, setRole }),
-    [walletAddress, profile, role, loading, refresh, setRole],
+    () => ({ walletAddress, profile, role, loading, hasHydrated, refresh, setRole }),
+    [walletAddress, profile, role, loading, hasHydrated, refresh, setRole],
   );
 
   return <CurrentUserProfileContext.Provider value={value}>{children}</CurrentUserProfileContext.Provider>;

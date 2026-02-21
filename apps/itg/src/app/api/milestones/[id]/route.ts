@@ -1,16 +1,11 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { ensureInitiativesSchema, emitAttestation, getDB, resolveIndividualIdByEoa } from "../../initiatives/_db";
+import { ensureInitiativesSchema, emitAttestation, getDB } from "../../initiatives/_db";
 
 function parseId(raw: string): number | null {
   const n = Number.parseInt(String(raw || ""), 10);
   return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function cleanEoa(raw: unknown): string | null {
-  const v = typeof raw === "string" ? raw.trim() : "";
-  return /^0x[a-fA-F0-9]{40}$/.test(v) ? v.toLowerCase() : null;
 }
 
 export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -20,7 +15,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     if (!milestoneId) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
     const body = await request.json().catch(() => ({}));
-    const { status, evidence_json, payout_json, actor_individual_id, actor_eoa } = body || {};
+    const { status, evidence_json, payout_json, actor_individual_id } = body || {};
 
     const db = await getDB();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 500 });
@@ -54,9 +49,11 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
       .bind(Number(existing.engagement_id))
       .first<any>();
 
-    const eoa = cleanEoa(actor_eoa);
     const actorIndividualId =
-      typeof actor_individual_id === "number" ? actor_individual_id : eoa ? await resolveIndividualIdByEoa(db, eoa) : null;
+      typeof actor_individual_id === "number" && actor_individual_id > 0 ? actor_individual_id : null;
+    if (!actorIndividualId) {
+      return NextResponse.json({ error: "actor_individual_id is required (number > 0)" }, { status: 400 });
+    }
 
     const prevStatus = typeof existing.status === "string" ? existing.status : null;
     const nextStatus = typeof status === "string" && status ? status : prevStatus;

@@ -23,7 +23,7 @@ import { useCurrentUserProfile } from "../../components/useCurrentUserProfile";
 import { useWeb3Auth } from "../../components/Web3AuthProvider";
 import {
   associateUserWithOrganizationByEoa,
-  getUserOrganizationsByEoa,
+  getUserOrganizationsByIndividualId,
   type OrganizationAssociation,
 } from "../service/userProfileService";
 import { generateSessionPackage } from "@agentic-trust/core";
@@ -119,6 +119,12 @@ export default function OrganizationSettingsPage() {
   const { web3auth } = useWeb3Auth();
   const { defaultOrgAgent } = useDefaultOrgAgent();
   const { walletAddress, profile } = useCurrentUserProfile();
+  const individualId = React.useMemo(() => {
+    const raw = (profile as any)?.id;
+    if (raw == null) return null;
+    const n = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [profile]);
 
   const [tab, setTab] = React.useState<OrgSettingsTab>("settings");
   const [organization, setOrganization] = React.useState<OrganizationAssociation | null>(null);
@@ -139,14 +145,13 @@ export default function OrganizationSettingsPage() {
 
   const hydrateKeyRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!walletAddress) {
+    if (!individualId) {
       setOrganization(null);
       setLoading(false);
       return;
     }
-    const eoa = walletAddress.toLowerCase();
     const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
-    const hydrateKey = `${eoa}:${desiredEns}`;
+    const hydrateKey = `${individualId}:${desiredEns}`;
     if (hydrateKeyRef.current === hydrateKey) return;
     hydrateKeyRef.current = hydrateKey;
 
@@ -155,7 +160,7 @@ export default function OrganizationSettingsPage() {
     setError(null);
     (async () => {
       try {
-        const orgs = await getUserOrganizationsByEoa(eoa);
+        const orgs = await getUserOrganizationsByIndividualId(individualId);
         if (cancelled) return;
         const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
         const match =
@@ -176,7 +181,7 @@ export default function OrganizationSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [walletAddress, defaultOrgAgent?.ensName]);
+  }, [individualId, defaultOrgAgent?.ensName]);
 
   const uaid = organization?.uaid ?? null;
   const ensName = organization?.ens_name ?? defaultOrgAgent?.ensName ?? null;

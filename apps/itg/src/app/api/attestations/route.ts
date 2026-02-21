@@ -1,12 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { ensureInitiativesSchema, emitAttestation, getDB, resolveIndividualIdByEoa } from "../initiatives/_db";
-
-function cleanEoa(raw: unknown): string | null {
-  const v = typeof raw === "string" ? raw.trim() : "";
-  return /^0x[a-fA-F0-9]{40}$/.test(v) ? v.toLowerCase() : null;
-}
+import { ensureInitiativesSchema, emitAttestation, getDB } from "../initiatives/_db";
 
 export async function GET(request: NextRequest) {
   try {
@@ -48,7 +43,6 @@ export async function POST(request: NextRequest) {
       engagement_id,
       milestone_id,
       actor_individual_id,
-      actor_eoa,
       actor_org_id,
       chain_id,
       tx_hash,
@@ -63,9 +57,11 @@ export async function POST(request: NextRequest) {
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 500 });
     await ensureInitiativesSchema(db);
 
-    const eoa = cleanEoa(actor_eoa);
     const actorIndividualId =
-      typeof actor_individual_id === "number" ? actor_individual_id : eoa ? await resolveIndividualIdByEoa(db, eoa) : null;
+      typeof actor_individual_id === "number" && actor_individual_id > 0 ? actor_individual_id : null;
+    if (!actorIndividualId) {
+      return NextResponse.json({ error: "actor_individual_id is required (number > 0)" }, { status: 400 });
+    }
 
     await emitAttestation(db, {
       attestation_type,

@@ -19,9 +19,10 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { useConnection } from "../../components/connection-context";
 import { useCurrentUserProfile } from "../../components/useCurrentUserProfile";
+import { useDefaultOrgAgent } from "../../components/useDefaultOrgAgent";
 import { getRoleTitle } from "../../components/appNav";
 import type { AppViewId } from "../../components/AppShell";
-import { getUserOrganizationsByEoa, type OrganizationAssociation } from "../service/userProfileService";
+import { getUserOrganizationsByIndividualId, upsertUserOrganizationByIndividualId, type OrganizationAssociation } from "../service/userProfileService";
 import {
   createEngagementFromOpportunity,
   createInitiative,
@@ -101,6 +102,7 @@ function stateLabel(state: InitiativeState): string {
 export default function ApplicationEnvironmentPage() {
   const router = useRouter();
   const { user } = useConnection();
+  const isConnected = Boolean(user);
   const searchParams = useSearchParams();
   const view = (searchParams?.get("view") ?? "trust-trail") as ViewId;
   const initiativeIdParam = searchParams?.get("initiativeId");
@@ -114,44 +116,88 @@ export default function ApplicationEnvironmentPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
-  const { walletAddress, profile, role } = useCurrentUserProfile();
-  const individualId = typeof profile?.id === "number" ? profile.id : null;
+  const { walletAddress, profile, role, loading: profileLoading, hasHydrated } = useCurrentUserProfile();
+  const { defaultOrgAgent } = useDefaultOrgAgent();
+  const profileRole = React.useMemo(() => (typeof profile?.role === "string" ? profile.role : null), [profile?.role]);
+  const individualId = React.useMemo(() => {
+    const raw = (profile as any)?.id;
+    if (raw == null) return null;
+    const n = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [profile]);
 
-  // Fetch organizations by EOA (profile is already hydrated in context).
-  const hydratedEoaRef = React.useRef<string | null>(null);
+  // Fetch organizations by individualId only (after profile is loaded).
+  const orgFetchKeyRef = React.useRef<string | null>(null); // last successful key
   React.useEffect(() => {
-    if (!user) {
+    if (!isConnected) {
       setOrgs(null);
       setLoading(false);
       return;
     }
-    if (!walletAddress) return;
-    const eoa = walletAddress.toLowerCase();
-    if (hydratedEoaRef.current === eoa) return;
-    hydratedEoaRef.current = eoa;
+    if (individualId == null || individualId < 1) {
+      setLoading(false);
+      orgFetchKeyRef.current = null;
+      return;
+    }
+    const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
+    const key = `${individualId}:${desiredEns}`;
+    if (orgFetchKeyRef.current === key) {
+      setLoading(false);
+      return;
+    }
 
-    let cancelled = false;
+    const ac = new AbortController();
     setLoading(true);
     setError(null);
     (async () => {
       try {
-        const orgList = await getUserOrganizationsByEoa(eoa);
-        if (!cancelled) setOrgs(orgList);
+        // Enforce referential integrity: if a selected org agent exists, ensure it is linked
+        // to this individual via organizations + individual_organizations (no EOA lookup).
+        const ens = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.trim() : "";
+        const agentNameRaw = typeof defaultOrgAgent?.agentName === "string" ? defaultOrgAgent.agentName.trim() : "";
+        const agentName = agentNameRaw || (ens ? String(ens.split(".")[0] || "").trim() : "");
+        if (ens && agentName) {
+          await upsertUserOrganizationByIndividualId({
+            individual_id: individualId,
+            ens_name: ens,
+            agent_name: agentName,
+            org_name: typeof defaultOrgAgent?.name === "string" ? defaultOrgAgent.name : null,
+            agent_account: typeof defaultOrgAgent?.agentAccount === "string" ? defaultOrgAgent.agentAccount : null,
+            uaid: typeof (defaultOrgAgent as any)?.uaid === "string" ? (defaultOrgAgent as any).uaid : null,
+            chain_id: typeof defaultOrgAgent?.chainId === "number" ? defaultOrgAgent.chainId : null,
+            is_primary: true,
+            role: profileRole,
+          });
+        }
+
+        if (ac.signal.aborted) return;
+        const orgList = await getUserOrganizationsByIndividualId(individualId);
+        if (!ac.signal.aborted) {
+          setOrgs(orgList);
+          orgFetchKeyRef.current = key;
+        }
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || String(e));
+        if (e?.name !== "AbortError") setError(e?.message || String(e));
+        // allow retry on next render
+        orgFetchKeyRef.current = null;
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     })();
     return () => {
-      cancelled = true;
+      ac.abort();
+      setLoading(false);
+      // allow retry after abort (connect/select races)
+      orgFetchKeyRef.current = null;
     };
-  }, [user, walletAddress]);
+  }, [isConnected, individualId, defaultOrgAgent?.ensName, profileRole]);
 
   const primaryOrg = React.useMemo(() => {
     const list = Array.isArray(orgs) ? orgs : [];
-    return list.find((o) => o.is_primary) ?? list[0] ?? null;
-  }, [orgs]);
+    const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
+    const selected = desiredEns ? list.find((o) => String(o.ens_name || "").toLowerCase() === desiredEns) ?? null : null;
+    return selected ?? list.find((o) => o.is_primary) ?? list[0] ?? null;
+  }, [orgs, defaultOrgAgent?.ensName]);
 
   const renderInitiativesHeaderCard = (
     <Card variant="outlined" sx={{ borderRadius: 3 }}>
@@ -193,31 +239,32 @@ export default function ApplicationEnvironmentPage() {
     const [loadingRows, setLoadingRows] = React.useState(false);
     const [err, setErr] = React.useState<string | null>(null);
     const [q, setQ] = React.useState("");
+    const [refreshTick, setRefreshTick] = React.useState(0);
 
-    const keyRef = React.useRef<string | null>(null);
     React.useEffect(() => {
-      if (!individualId) return;
-      const key = `${individualId}:${scope}`;
-      if (keyRef.current === key) return;
-      keyRef.current = key;
-
-      let cancelled = false;
+      if (!individualId) {
+        setRows([]);
+        setLoadingRows(false);
+        return;
+      }
+      const ac = new AbortController();
       setLoadingRows(true);
       setErr(null);
       (async () => {
         try {
-          const list = await listInitiatives(individualId, scope);
-          if (!cancelled) setRows(list);
+          const list = await listInitiatives(individualId, scope, ac.signal);
+          setRows(list);
         } catch (e: any) {
-          if (!cancelled) setErr(e?.message || String(e));
+          if (e?.name !== "AbortError") setErr(e?.message || String(e));
         } finally {
-          if (!cancelled) setLoadingRows(false);
+          setLoadingRows(false);
         }
       })();
       return () => {
-        cancelled = true;
+        ac.abort();
+        setLoadingRows(false);
       };
-    }, [scope, individualId]);
+    }, [scope, individualId, refreshTick]);
 
     const filtered = React.useMemo(() => {
       const query = q.trim().toLowerCase();
@@ -240,9 +287,9 @@ export default function ApplicationEnvironmentPage() {
                 variant="outlined"
                 size="small"
                 onClick={() => {
-                  keyRef.current = null;
                   setRows([]);
                   setQ("");
+                  setRefreshTick((t) => t + 1);
                 }}
               >
                 Refresh
@@ -814,7 +861,7 @@ export default function ApplicationEnvironmentPage() {
                           await createEngagementFromOpportunity(engOppId, {
                             initiative_id: initiative.id,
                             requesting_organization_id: typeof primaryOrg?.id === "number" ? primaryOrg.id : null,
-                            contributor_eoa: engContributorEoa.trim() || null,
+                            contributor_individual_id: null,
                             status: engStatus,
                             actor_individual_id: individualId,
                             terms_json: {
@@ -1044,16 +1091,20 @@ export default function ApplicationEnvironmentPage() {
 
           {error ? <Alert severity="error">{error}</Alert> : null}
 
-          {loading ? (
-            <Placeholder title="Loading…" note="Fetching your organizations by EOA." />
-          ) : !user ? (
+          {!user ? (
             <Placeholder title="Not connected" links={[{ label: "Onboarding", href: "/onboarding" }]} />
+          ) : !walletAddress ? (
+            <Placeholder title="Loading…" note="Waiting for wallet…" />
+          ) : profileLoading || !hasHydrated ? (
+            <Placeholder title="Loading…" note="Loading your profile…" />
           ) : !profile ? (
             <Placeholder
               title="No profile found"
               note="Complete onboarding to create your participant agent and role profile."
               links={[{ label: "Onboarding", href: "/onboarding" }]}
             />
+          ) : loading ? (
+            <Placeholder title="Loading…" note="Fetching your organizations…" />
           ) : (
             <>
               {renderInitiativesHeaderCard}

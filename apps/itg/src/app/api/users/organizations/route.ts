@@ -5,7 +5,7 @@ import type { D1Database } from '../../../../lib/db';
 import { getD1Database } from '../../../../lib/d1-wrapper';
 
 /**
- * GET /api/users/organizations?email=... or ?eoa=...
+ * GET /api/users/organizations?individualId=... or ?eoa=... or ?email=...
  * POST /api/users/organizations - Associate user with an organization (by email or EOA)
  */
 async function getDB(): Promise<D1Database | null> {
@@ -83,12 +83,13 @@ export async function GET(request: NextRequest) {
   try {
     console.log('[users/organizations] GET request received');
     const searchParams = request.nextUrl.searchParams;
+    const individualIdParam = searchParams.get('individualId') ?? searchParams.get('individual_id');
     const email = searchParams.get('email');
     const eoa = searchParams.get('eoa');
 
-    if (!email && !eoa) {
+    if (!individualIdParam && !email && !eoa) {
       return NextResponse.json(
-        { error: 'Either email or eoa parameter is required' },
+        { error: 'Either individualId, email, or eoa parameter is required' },
         { status: 400 }
       );
     }
@@ -116,17 +117,29 @@ export async function GET(request: NextRequest) {
     console.log('[users/organizations] Database connection obtained');
     await ensureOrganizationsSchema(db);
 
+    const individualIdFromParam =
+      individualIdParam && /^\d+$/.test(String(individualIdParam).trim())
+        ? Number.parseInt(String(individualIdParam).trim(), 10)
+        : null;
     const cleanedEmail =
       typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
     const cleanedEoa =
-      typeof eoa === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa) ? eoa : null;
+      typeof eoa === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa) ? eoa.toLowerCase() : null;
 
-    // Get individual ID
-    const individual = cleanedEoa
-      ? await db.prepare('SELECT id FROM individuals WHERE eoa_address = ?').bind(cleanedEoa).first<{ id: number }>()
-      : cleanedEmail
-        ? await db.prepare('SELECT id FROM individuals WHERE email = ?').bind(cleanedEmail).first<{ id: number }>()
-        : null;
+    // Resolve individual ID: prefer param, then eoa, then email
+    let individual: { id: number } | null = null;
+    if (typeof individualIdFromParam === "number" && individualIdFromParam > 0) {
+      const row = await db.prepare('SELECT id FROM individuals WHERE id = ?').bind(individualIdFromParam).first<{ id: number }>();
+      individual = row ? { id: row.id } : null;
+    }
+    if (!individual && cleanedEoa) {
+      const row = await db.prepare('SELECT id FROM individuals WHERE lower(eoa_address) = ?').bind(cleanedEoa).first<{ id: number }>();
+      individual = row ? { id: row.id } : null;
+    }
+    if (!individual && cleanedEmail) {
+      const row = await db.prepare('SELECT id FROM individuals WHERE email = ?').bind(cleanedEmail).first<{ id: number }>();
+      individual = row ? { id: row.id } : null;
+    }
 
     if (!individual) {
       return NextResponse.json({ organizations: [] });
@@ -191,6 +204,8 @@ export async function POST(request: NextRequest) {
     console.log('[users/organizations] POST request received');
     const body = await request.json();
     const {
+      individualId,
+      individual_id,
       email,
       eoa_address,
       ens_name,
@@ -209,17 +224,32 @@ export async function POST(request: NextRequest) {
       role,
     } = body;
 
+    const individualIdFromBody =
+      (typeof individualId === "number" && Number.isFinite(individualId) && individualId > 0
+        ? individualId
+        : typeof individualId === "string" && /^\d+$/.test(individualId.trim())
+          ? Number.parseInt(individualId.trim(), 10)
+          : typeof individual_id === "number" && Number.isFinite(individual_id) && individual_id > 0
+            ? individual_id
+            : typeof individual_id === "string" && /^\d+$/.test(individual_id.trim())
+              ? Number.parseInt(individual_id.trim(), 10)
+              : null);
+
     const cleanedEmail =
       typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
     const cleanedEoa =
       typeof eoa_address === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa_address) ? eoa_address : null;
 
-    if ((!cleanedEmail && !cleanedEoa) || !ens_name || !agent_name || !email_domain) {
+    if ((!individualIdFromBody && !cleanedEmail && !cleanedEoa) || !ens_name || !agent_name) {
       return NextResponse.json(
-        { error: 'Missing required fields: (email or eoa_address), ens_name, agent_name, email_domain' },
+        { error: 'Missing required fields: (individualId or email or eoa_address), ens_name, agent_name' },
         { status: 400 }
       );
     }
+
+    // We do not derive this from email. Keep a stable placeholder for legacy NOT NULL schema.
+    const resolvedEmailDomain =
+      typeof email_domain === "string" && email_domain.trim() ? email_domain.trim().toLowerCase() : "unknown";
 
     console.log('[users/organizations] Getting database connection...');
     const db = await getDB();
@@ -245,19 +275,28 @@ export async function POST(request: NextRequest) {
     await ensureAgentsSchema(db);
     await ensureOrganizationsSchema(db);
 
-    // Get or create individual
-    let individual = cleanedEoa
-      ? await db.prepare('SELECT id FROM individuals WHERE eoa_address = ?').bind(cleanedEoa).first<{ id: number }>()
-      : await db.prepare('SELECT id FROM individuals WHERE email = ?').bind(cleanedEmail).first<{ id: number }>();
+    // Resolve individual (individualId path is strict: must already exist)
+    let individual: { id: number } | null = null;
+    if (typeof individualIdFromBody === "number" && individualIdFromBody > 0) {
+      const row = await db.prepare("SELECT id FROM individuals WHERE id = ?").bind(individualIdFromBody).first<{ id: number }>();
+      if (!row?.id) {
+        return NextResponse.json({ error: "Invalid individualId (individual not found)" }, { status: 400 });
+      }
+      individual = { id: row.id };
+    } else {
+      // Legacy path: resolve by eoa/email (may create the individual if missing)
+      individual = cleanedEoa
+        ? await db.prepare('SELECT id FROM individuals WHERE eoa_address = ?').bind(cleanedEoa).first<{ id: number }>()
+        : await db.prepare('SELECT id FROM individuals WHERE email = ?').bind(cleanedEmail).first<{ id: number }>();
 
-    if (!individual) {
-      // Create individual if it doesn't exist
-      const now = Math.floor(Date.now() / 1000);
-      const insertResult = await db.prepare(
-        'INSERT INTO individuals (email, eoa_address, created_at, updated_at) VALUES (?, ?, ?, ?)'
-      ).bind(cleanedEmail, cleanedEoa, now, now).run();
-      
-      individual = { id: Number(insertResult.meta.last_row_id) };
+      if (!individual) {
+        const now = Math.floor(Date.now() / 1000);
+        const insertResult = await db.prepare(
+          'INSERT INTO individuals (email, eoa_address, created_at, updated_at) VALUES (?, ?, ?, ?)'
+        ).bind(cleanedEmail, cleanedEoa, now, now).run();
+        
+        individual = { id: Number(insertResult.meta.last_row_id) };
+      }
     }
 
     // Get or create organization
@@ -293,7 +332,7 @@ export async function POST(request: NextRequest) {
             typeof uaid === "string" ? uaid : null,
             ens_name,
             agent_name,
-            email_domain,
+            resolvedEmailDomain,
             agent_account || null,
             resolvedChainId,
             typeof session_package === "string" ? session_package : null,
@@ -311,7 +350,7 @@ export async function POST(request: NextRequest) {
             typeof uaid === "string" ? uaid : null,
             ens_name,
             agent_name,
-            email_domain,
+            resolvedEmailDomain,
             agent_account || null,
             resolvedChainId,
             typeof session_package === "string" ? session_package : null,
@@ -336,7 +375,7 @@ export async function POST(request: NextRequest) {
         org_name || null,
         org_address || null,
         org_type || null,
-        email_domain,
+        resolvedEmailDomain,
         agent_account || null,
         typeof uaid === "string" ? uaid : null,
         agentRowId,
@@ -376,7 +415,7 @@ export async function POST(request: NextRequest) {
             typeof uaid === "string" ? uaid : null,
             ens_name,
             agent_name,
-            email_domain,
+            resolvedEmailDomain,
             agent_account || null,
             resolvedChainId,
             typeof session_package === "string" ? session_package : null,
@@ -394,7 +433,7 @@ export async function POST(request: NextRequest) {
             typeof uaid === "string" ? uaid : null,
             ens_name,
             agent_name,
-            email_domain,
+            resolvedEmailDomain,
             agent_account || null,
             resolvedChainId,
             typeof session_package === "string" ? session_package : null,

@@ -93,12 +93,13 @@ export async function saveUserProfile(profile: UserProfile): Promise<UserProfile
 /**
  * Get user profile by email or EOA
  */
-export async function getUserProfile(email?: string, eoa?: string): Promise<UserProfile | null> {
-  if (!email && !eoa) {
+export async function getUserProfile(email?: string, eoa?: string, individualId?: number): Promise<UserProfile | null> {
+  if (individualId == null && !email && !eoa) {
     return null;
   }
 
   const params = new URLSearchParams();
+  if (typeof individualId === 'number' && individualId > 0) params.set('individualId', String(individualId));
   if (email) params.append('email', email);
   if (eoa) params.append('eoa', eoa);
 
@@ -187,6 +188,41 @@ export async function getUserOrganizationsByEoa(eoa_address: string): Promise<Or
   }
   const data = await response.json();
   return data.organizations || [];
+}
+
+/** Prefer this when you already have the current user's individual id (e.g. from profile). */
+export async function getUserOrganizationsByIndividualId(individualId: number): Promise<OrganizationAssociation[]> {
+  const response = await fetch(`/api/users/organizations?individualId=${encodeURIComponent(individualId)}`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to get user organizations');
+  }
+  const data = await response.json();
+  return data.organizations || [];
+}
+
+export async function upsertUserOrganizationByIndividualId(input: {
+  individual_id: number;
+  ens_name: string;
+  agent_name: string;
+  org_name?: string | null;
+  org_address?: string | null;
+  org_type?: string | null;
+  agent_account?: string | null;
+  uaid?: string | null;
+  chain_id?: number | null;
+  is_primary?: boolean;
+  role?: string | null;
+}): Promise<void> {
+  const response = await fetch('/api/users/organizations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || error.error || 'Failed to upsert organization association');
+  }
 }
 
 /**
