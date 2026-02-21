@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
 import dynamic from "next/dynamic";
 import * as React from "react";
+import { Inter } from "next/font/google";
 import { Providers } from "./providers";
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+});
 
 const Web3AuthProvider = dynamic(
   () =>
@@ -18,8 +24,8 @@ const WalletProvider = dynamic(
 );
 
 export const metadata: Metadata = {
-  title: "Impace App",
-  description: "Impace Next.js application in the itg monorepo."
+  title: "Impact App",
+  description: "Impact Next.js application in the itg monorepo."
 };
 
 export default function RootLayout({
@@ -29,7 +35,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
+      <body className={inter.className}>
         <Web3AuthProvider>
           <WalletProvider>
             <Providers>{children}</Providers>

@@ -1,0 +1,2249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic Trust Layer | ETHDenver 2026</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2B5797;
+            --secondary: #0D7377;
+            --accent: #7B1FA2;
+            --success: #28A745;
+            --warning: #F57C00;
+            --danger: #DC3545;
+            --bg: #f5f5f5;
+            --card: #ffffff;
+            --text: #333333;
+            --muted: #666666;
+            --border: #e0e0e0;
+            --sidebar: #1A3A5C;
+            --observer: #9E9E9E;
+            --advisor: #F57C00;
+            --coordinator-tier: #2B5797;
+            --steward: #7B1FA2;
+            --transition: 0.25s ease;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            overflow: hidden;
+        }
+
+        /* Layout */
+        .layout {
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            grid-template-rows: 64px 1fr;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .sidebar {
+            grid-column: 1;
+            grid-row: 1 / -1;
+            background-color: var(--sidebar);
+            color: white;
+            padding: 20px 0;
+            overflow-y: auto;
+            border-right: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .header {
+            grid-column: 2;
+            grid-row: 1;
+            background-color: var(--card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 32px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .main-content {
+            grid-column: 2;
+            grid-row: 2;
+            overflow-y: auto;
+            padding: 32px;
+            background-color: var(--bg);
+        }
+
+        /* Sidebar Navigation */
+        .sidebar-logo {
+            padding: 0 20px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.15);
+            margin-bottom: 24px;
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .sidebar-section {
+            margin-bottom: 28px;
+        }
+
+        .sidebar-section-title {
+            padding: 0 20px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+        }
+
+        .sidebar-item {
+            padding: 10px 20px;
+            margin: 0 8px;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: var(--transition);
+            color: rgba(255,255,255,0.7);
+            border-left: 3px solid transparent;
+        }
+
+        .sidebar-item:hover {
+            background-color: rgba(255,255,255,0.1);
+            color: white;
+        }
+
+        .sidebar-item.active {
+            background-color: rgba(255,255,255,0.15);
+            color: white;
+            border-left-color: white;
+        }
+
+        /* Header */
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .breadcrumb {
+            font-size: 14px;
+            color: var(--muted);
+        }
+
+        .breadcrumb strong {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .web3-badge {
+            font-size: 12px;
+            padding: 6px 12px;
+            background-color: #f0f0f0;
+            border-radius: 20px;
+            color: var(--secondary);
+            font-weight: 500;
+        }
+
+        .role-switcher {
+            position: relative;
+        }
+
+        .role-button {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            background-color: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        .role-button:hover {
+            background-color: white;
+            border-color: var(--primary);
+        }
+
+        .role-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .role-dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background-color: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-top: 8px;
+            min-width: 240px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            display: none;
+            z-index: 1000;
+        }
+
+        .role-dropdown.open {
+            display: block;
+        }
+
+        .role-option {
+            padding: 12px 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 13px;
+            transition: var(--transition);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .role-option:last-child {
+            border-bottom: none;
+        }
+
+        .role-option:hover {
+            background-color: var(--bg);
+        }
+
+        .role-option.active {
+            background-color: #e8f4fd;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .role-option-checkmark {
+            margin-left: auto;
+            font-weight: 700;
+            color: var(--success);
+        }
+
+        .role-option-role {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+
+        /* Views */
+        .view {
+            display: none;
+        }
+
+        .view.active {
+            display: block;
+            animation: fadeIn 0.25s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Cards and Layouts */
+        .card {
+            background-color: var(--card);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-header h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .card-header-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background-color: var(--card);
+            border-radius: 10px;
+            padding: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--muted);
+            font-weight: 500;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .stat-subtext {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 6px;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: var(--transition);
+            font-family: 'Inter', sans-serif;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #1e3f5a;
+        }
+
+        .btn-secondary {
+            background-color: transparent;
+            color: var(--primary);
+            border: 1px solid var(--primary);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--primary);
+            color: white;
+        }
+
+        .btn-success {
+            background-color: var(--success);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background-color: #218838;
+        }
+
+        .btn-danger {
+            background-color: var(--danger);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+
+        .btn-warning {
+            background-color: var(--warning);
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background-color: #e06b00;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .btn-icon {
+            padding: 8px 12px;
+            background-color: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+
+        .btn-icon:hover {
+            background-color: var(--bg);
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .badge-observer {
+            background-color: #e8e8e8;
+            color: #555;
+        }
+
+        .badge-advisor {
+            background-color: #fff3e0;
+            color: #e65100;
+        }
+
+        .badge-coordinator {
+            background-color: #e3f2fd;
+            color: #1565c0;
+        }
+
+        .badge-steward {
+            background-color: #f3e5f5;
+            color: #6a1b9a;
+        }
+
+        .badge-status {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .badge-pending {
+            background-color: #fff3e0;
+            color: #e65100;
+        }
+
+        .badge-active {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .badge-base { background-color: #0052ff; color: white; font-size: 10px; }
+        .badge-eth { background-color: #627eea; color: white; font-size: 10px; }
+        .badge-linea { background-color: #121212; color: white; font-size: 10px; }
+
+        /* Tables */
+        .table-responsive {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px;
+            background-color: var(--bg);
+            border-bottom: 2px solid var(--border);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background-color: var(--bg);
+        }
+
+        /* Modals */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 1100;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.open {
+            display: flex;
+        }
+
+        .modal {
+            background-color: var(--card);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .modal-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--muted);
+            transition: var(--transition);
+        }
+
+        .modal-close:hover {
+            color: var(--text);
+        }
+
+        .modal-body {
+            padding: 24px;
+        }
+
+        .modal-footer {
+            padding: 24px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        /* Forms */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text);
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            transition: var(--transition);
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(43, 87, 151, 0.1);
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 32px;
+            right: 32px;
+            z-index: 2000;
+        }
+
+        .toast {
+            background-color: var(--card);
+            border-left: 4px solid var(--success);
+            padding: 14px 20px;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            margin-bottom: 12px;
+            font-size: 13px;
+            animation: slideInRight 0.3s ease;
+            min-width: 300px;
+        }
+
+        .toast.success { border-left-color: var(--success); }
+        .toast.warning { border-left-color: var(--warning); }
+        .toast.error { border-left-color: var(--danger); }
+        .toast.info { border-left-color: var(--secondary); }
+
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background-color: #d0d0d0;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background-color: #b0b0b0;
+        }
+
+        /* Utility Classes */
+        .flex {
+            display: flex;
+        }
+
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .flex-center {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .gap-8 { gap: 8px; }
+        .gap-12 { gap: 12px; }
+        .gap-16 { gap: 16px; }
+
+        .mt-12 { margin-top: 12px; }
+        .mt-16 { margin-top: 16px; }
+        .mb-12 { margin-bottom: 12px; }
+        .mb-16 { margin-bottom: 16px; }
+
+        .text-muted { color: var(--muted); }
+        .text-success { color: var(--success); }
+        .text-danger { color: var(--danger); }
+        .text-warning { color: var(--warning); }
+
+        .text-sm { font-size: 12px; }
+        .text-lg { font-size: 16px; }
+
+        .font-bold { font-weight: 700; }
+        .font-semibold { font-weight: 600; }
+
+        /* Agent Cards */
+        .agent-card {
+            background-color: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .agent-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border-color: var(--primary);
+        }
+
+        .agent-card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .agent-avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .agent-info h4 {
+            font-size: 14px;
+            font-weight: 600;
+            margin: 0 0 4px 0;
+        }
+
+        .agent-info p {
+            font-size: 12px;
+            color: var(--muted);
+            margin: 0;
+        }
+
+        .agent-card-badges {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        /* Opportunity Cards */
+        .opportunity-card {
+            background-color: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .opportunity-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border-color: var(--primary);
+        }
+
+        .opportunity-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 12px;
+        }
+
+        .opportunity-header h4 {
+            font-size: 14px;
+            font-weight: 600;
+            margin: 0;
+            flex: 1;
+        }
+
+        .match-indicator {
+            background-color: var(--success);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .opportunity-details {
+            display: flex;
+            gap: 16px;
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 12px;
+        }
+
+        .opportunity-detail-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Progress Bar */
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background-color: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: var(--success);
+            transition: width 0.3s ease;
+        }
+
+        /* ETHDenver Watermark */
+        .ethdenver-badge {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: linear-gradient(135deg, #7B1FA2, #2B5797);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            z-index: 999;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        /* Timeline */
+        .timeline {
+            position: relative;
+            padding: 20px 0;
+        }
+
+        .timeline-item {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .timeline-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--primary);
+            margin-top: 4px;
+            flex-shrink: 0;
+        }
+
+        .timeline-content {
+            flex: 1;
+        }
+
+        .timeline-content h5 {
+            font-size: 13px;
+            font-weight: 600;
+            margin: 0 0 4px 0;
+        }
+
+        .timeline-content p {
+            font-size: 12px;
+            color: var(--muted);
+            margin: 0;
+        }
+
+        /* Divider */
+        .divider {
+            height: 1px;
+            background-color: var(--border);
+            margin: 20px 0;
+        }
+
+        /* Status workflow */
+        .status-workflow {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 20px 0;
+        }
+
+        .workflow-step {
+            flex: 1;
+            height: 4px;
+            background-color: var(--border);
+            border-radius: 2px;
+            position: relative;
+        }
+
+        .workflow-step.completed {
+            background-color: var(--success);
+        }
+
+        .workflow-step.active {
+            background-color: var(--primary);
+        }
+
+        /* Alert Box */
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            font-size: 13px;
+        }
+
+        .alert-info {
+            background-color: #e3f2fd;
+            color: #1565c0;
+            border-left: 3px solid #1565c0;
+        }
+
+        .alert-warning {
+            background-color: #fff3e0;
+            color: #e65100;
+            border-left: 3px solid #e65100;
+        }
+
+        .alert-success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border-left: 3px solid #2e7d32;
+        }
+
+        /* Grid Layouts */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        @media (max-width: 1200px) {
+            .grid-3 { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 768px) {
+            .grid-2 { grid-template-columns: 1fr; }
+            .grid-3 { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="layout">
+    <!-- SIDEBAR -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-logo">🔐 AGENTIC TRUST</div>
+        <div class="sidebar-section" id="sidebar-main">
+            <div class="sidebar-section-title">Main</div>
+        </div>
+        <div class="sidebar-section" id="sidebar-tools">
+            <div class="sidebar-section-title">Admin Tools</div>
+        </div>
+    </div>
+
+    <!-- HEADER -->
+    <div class="header">
+        <div class="header-left">
+            <div class="breadcrumb">
+                <strong id="header-title">Dashboard</strong>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="web3-badge">🔗 Connected via Web3Auth</div>
+            <div class="role-switcher">
+                <button class="role-button" id="role-button">
+                    <span class="role-dot" id="role-dot"></span>
+                    <span id="role-name">Admin</span>
+                </button>
+                <div class="role-dropdown" id="role-dropdown"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="main-content" id="main-content">
+        <!-- Views will be inserted here -->
+    </div>
+</div>
+
+<!-- Modal Overlay -->
+<div class="modal-overlay" id="modal-overlay">
+    <div class="modal" id="modal">
+        <div class="modal-header">
+            <h2 id="modal-title">Modal Title</h2>
+            <button class="modal-close" id="modal-close">&times;</button>
+        </div>
+        <div class="modal-body" id="modal-body"></div>
+        <div class="modal-footer" id="modal-footer"></div>
+    </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ETHDenver Badge -->
+<div class="ethdenver-badge">🏗️ ETHDenver 2026 BUIDLathon</div>
+
+<script>
+    // ============================================================
+    // PART 1: STATE MANAGEMENT & DATA
+    // ============================================================
+
+    const APP_STATE = {
+        currentRole: 'admin',
+        currentView: 'dashboard',
+        user: null
+    };
+
+    const ROLES = {
+        admin: {
+            id: 'admin',
+            name: 'Elena Rodriguez',
+            title: 'System Administrator',
+            color: '#DC3545',
+            dotClass: 'role-dot',
+            navSections: ['main', 'admin']
+        },
+        coordinator: {
+            id: 'coordinator',
+            name: 'Sarah Chen',
+            title: 'Coalition Coordinator',
+            color: '#7B1FA2',
+            dotClass: 'role-dot',
+            navSections: ['main', 'coordination']
+        },
+        org_admin: {
+            id: 'org_admin',
+            name: 'Marcus Webb',
+            title: 'Organization Admin',
+            color: '#2B5797',
+            dotClass: 'role-dot',
+            navSections: ['main', 'org_admin']
+        },
+        contributor: {
+            id: 'contributor',
+            name: 'Priya Patel',
+            title: 'Data Analyst',
+            color: '#28A745',
+            dotClass: 'role-dot',
+            navSections: ['main']
+        },
+        funder: {
+            id: 'funder',
+            name: 'David Park',
+            title: 'Grantmaker',
+            color: '#F57C00',
+            dotClass: 'role-dot',
+            navSections: ['main', 'grant']
+        }
+    };
+
+    const NAV_ITEMS = {
+        main: {
+            label: 'Main',
+            items: [
+                { id: 'dashboard', label: '📊 Dashboard', view: 'dashboard' },
+                { id: 'agents', label: '🤖 Agent Registry', view: 'agent-registry', roles: ['admin', 'coordinator', 'org_admin'] },
+                { id: 'coordination', label: '🔄 Coordination Hub', view: 'coordination-hub', roles: ['coordinator'] },
+                { id: 'trust-trail', label: '📜 Trust Trail', view: 'trust-trail' },
+                { id: 'opportunities', label: '💼 Opportunities', view: 'opportunities', roles: ['contributor'] },
+                { id: 'engagements', label: '✅ My Engagements', view: 'my-engagements', roles: ['contributor'] },
+                { id: 'reputation', label: '⭐ My Reputation', view: 'my-reputation', roles: ['contributor'] },
+                { id: 'wallet', label: '💰 Wallet & Transactions', view: 'wallet', roles: ['coordinator', 'org_admin', 'contributor', 'admin'] },
+                { id: 'ecosystem', label: '🌐 Ecosystem Map', view: 'ecosystem-map', roles: ['admin', 'coordinator', 'funder'] },
+                { id: 'portfolio', label: '📈 Portfolio Overview', view: 'portfolio-overview', roles: ['funder'] },
+                { id: 'outcomes', label: '✔️ Outcome Verification', view: 'outcome-verification', roles: ['funder'] },
+                { id: 'compliance', label: '📋 Compliance', view: 'compliance', roles: ['funder'] },
+                { id: 'analytics', label: '📊 Analytics', view: 'analytics', roles: ['admin', 'coordinator', 'funder'] }
+            ]
+        },
+        admin: {
+            label: 'Admin Tools',
+            items: [
+                { id: 'system-settings', label: '⚙️ System Settings', view: 'system-settings', roles: ['admin'] },
+                { id: 'users', label: '👥 User Management', view: 'user-management', roles: ['admin'] },
+                { id: 'protocol', label: '📡 Protocol Config', view: 'protocol-config', roles: ['admin'] },
+                { id: 'approvals', label: '✋ Agent Approvals', view: 'agent-approvals', roles: ['admin', 'coordinator'] },
+                { id: 'audit', label: '🔍 Audit Log', view: 'audit-log', roles: ['admin'] }
+            ]
+        },
+        coordination: {
+            label: 'Coordination Tools',
+            items: [
+                { id: 'coalition-settings', label: '⚙️ Coalition Settings', view: 'coalition-settings', roles: ['coordinator'] },
+                { id: 'member-orgs', label: '🏢 Member Organizations', view: 'member-organizations', roles: ['coordinator'] },
+                { id: 'coordinator-sync', label: '🔗 Coordinator Sync', view: 'coordinator-sync', roles: ['coordinator'] }
+            ]
+        },
+        org_admin: {
+            label: 'Organization Tools',
+            items: [
+                { id: 'org-settings', label: '⚙️ Organization Settings', view: 'org-settings', roles: ['org_admin'] },
+                { id: 'team', label: '👤 Team Management', view: 'team-management', roles: ['org_admin'] },
+                { id: 'budget', label: '💵 Budget & Allocations', view: 'budget-allocations', roles: ['org_admin'] },
+                { id: 'agent-config', label: '🤖 Agent Configuration', view: 'agent-configuration', roles: ['org_admin'] }
+            ]
+        },
+        grant: {
+            label: 'Grant Admin',
+            items: [
+                { id: 'grant-config', label: '📋 Grant Configuration', view: 'grant-configuration', roles: ['funder'] },
+                { id: 'reporting', label: '📝 Reporting Settings', view: 'reporting-settings', roles: ['funder'] }
+            ]
+        }
+    };
+
+    // ============================================================
+    // PART 2: UI INITIALIZATION
+    // ============================================================
+
+    function initializeUI() {
+        renderRoleDropdown();
+        buildNavigation();
+        setRole('admin');
+        switchToView('dashboard');
+    }
+
+    function renderRoleDropdown() {
+        const dropdown = document.getElementById('role-dropdown');
+        dropdown.innerHTML = '';
+
+        Object.values(ROLES).forEach(role => {
+            const option = document.createElement('div');
+            option.className = `role-option ${role.id === APP_STATE.currentRole ? 'active' : ''}`;
+            option.innerHTML = `
+                <div>
+                    <span class="role-dot" style="background-color: ${role.color}"></span>
+                    <strong>${role.name}</strong>
+                    <div class="role-option-role">${role.title}</div>
+                </div>
+                ${role.id === APP_STATE.currentRole ? '<span class="role-option-checkmark">✓</span>' : ''}
+            `;
+            option.addEventListener('click', () => setRole(role.id));
+            dropdown.appendChild(option);
+        });
+    }
+
+    function setRole(roleId) {
+        APP_STATE.currentRole = roleId;
+        const role = ROLES[roleId];
+
+        document.getElementById('role-dot').style.backgroundColor = role.color;
+        document.getElementById('role-name').textContent = role.name.split(' ')[0];
+
+        renderRoleDropdown();
+        buildNavigation();
+
+        showToast(`Switched to ${role.name}`, 'info');
+
+        // Reset to dashboard on role switch
+        switchToView('dashboard');
+
+        // Close dropdown
+        document.getElementById('role-dropdown').classList.remove('open');
+    }
+
+    document.getElementById('role-button').addEventListener('click', () => {
+        document.getElementById('role-dropdown').classList.toggle('open');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.role-switcher')) {
+            document.getElementById('role-dropdown').classList.remove('open');
+        }
+    });
+
+    function buildNavigation() {
+        const mainSidebar = document.getElementById('sidebar-main');
+        const toolsSidebar = document.getElementById('sidebar-tools');
+        const adminSidebar = document.getElementById('sidebar-tools');
+
+        mainSidebar.innerHTML = '<div class="sidebar-section-title">Main</div>';
+        toolsSidebar.innerHTML = '';
+        adminSidebar.innerHTML = '';
+
+        const role = ROLES[APP_STATE.currentRole];
+
+        // Main section
+        const mainItems = NAV_ITEMS.main.items.filter(item =>
+            !item.roles || item.roles.includes(APP_STATE.currentRole)
+        );
+
+        mainItems.forEach(item => {
+            const navItem = document.createElement('div');
+            navItem.className = `sidebar-item ${item.id === APP_STATE.currentView ? 'active' : ''}`;
+            navItem.textContent = item.label;
+            navItem.addEventListener('click', () => switchToView(item.view, item.label));
+            mainSidebar.appendChild(navItem);
+        });
+
+        // Admin/Tools sections
+        if (role.navSections.includes('admin')) {
+            adminSidebar.innerHTML = '<div class="sidebar-section-title">Admin Tools</div>';
+            NAV_ITEMS.admin.items
+                .filter(item => item.roles.includes(APP_STATE.currentRole))
+                .forEach(item => {
+                    const navItem = document.createElement('div');
+                    navItem.className = `sidebar-item ${item.id === APP_STATE.currentView ? 'active' : ''}`;
+                    navItem.textContent = item.label;
+                    navItem.addEventListener('click', () => switchToView(item.view, item.label));
+                    adminSidebar.appendChild(navItem);
+                });
+        }
+
+        if (role.navSections.includes('coordination')) {
+            const coordSection = document.createElement('div');
+            coordSection.className = 'sidebar-section';
+            coordSection.innerHTML = '<div class="sidebar-section-title">Coordination Tools</div>';
+            NAV_ITEMS.coordination.items
+                .filter(item => item.roles.includes(APP_STATE.currentRole))
+                .forEach(item => {
+                    const navItem = document.createElement('div');
+                    navItem.className = `sidebar-item ${item.id === APP_STATE.currentView ? 'active' : ''}`;
+                    navItem.textContent = item.label;
+                    navItem.addEventListener('click', () => switchToView(item.view, item.label));
+                    coordSection.appendChild(navItem);
+                });
+            document.getElementById('sidebar').appendChild(coordSection);
+        }
+
+        if (role.navSections.includes('org_admin')) {
+            const orgSection = document.createElement('div');
+            orgSection.className = 'sidebar-section';
+            orgSection.innerHTML = '<div class="sidebar-section-title">Organization Tools</div>';
+            NAV_ITEMS.org_admin.items
+                .filter(item => item.roles.includes(APP_STATE.currentRole))
+                .forEach(item => {
+                    const navItem = document.createElement('div');
+                    navItem.className = `sidebar-item ${item.id === APP_STATE.currentView ? 'active' : ''}`;
+                    navItem.textContent = item.label;
+                    navItem.addEventListener('click', () => switchToView(item.view, item.label));
+                    orgSection.appendChild(navItem);
+                });
+            document.getElementById('sidebar').appendChild(orgSection);
+        }
+
+        if (role.navSections.includes('grant')) {
+            const grantSection = document.createElement('div');
+            grantSection.className = 'sidebar-section';
+            grantSection.innerHTML = '<div class="sidebar-section-title">Grant Admin</div>';
+            NAV_ITEMS.grant.items
+                .filter(item => item.roles.includes(APP_STATE.currentRole))
+                .forEach(item => {
+                    const navItem = document.createElement('div');
+                    navItem.className = `sidebar-item ${item.id === APP_STATE.currentView ? 'active' : ''}`;
+                    navItem.textContent = item.label;
+                    navItem.addEventListener('click', () => switchToView(item.view, item.label));
+                    grantSection.appendChild(navItem);
+                });
+            document.getElementById('sidebar').appendChild(grantSection);
+        }
+    }
+
+    function switchToView(viewId, title = '') {
+        APP_STATE.currentView = viewId;
+        document.getElementById('header-title').textContent = title || 'View';
+
+        // Hide all views
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+
+        // Show requested view
+        let viewElement = document.getElementById(`view-${viewId}`);
+        if (!viewElement) {
+            createView(viewId);
+            viewElement = document.getElementById(`view-${viewId}`);
+        }
+        viewElement.classList.add('active');
+
+        // Update nav highlight
+        document.querySelectorAll('.sidebar-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        document.querySelector(`[data-view="${viewId}"]`)?.classList.add('active');
+    }
+
+    function createView(viewId) {
+        const mainContent = document.getElementById('main-content');
+        const view = document.createElement('div');
+        view.id = `view-${viewId}`;
+        view.className = 'view';
+
+        // Content will be injected by view rendering functions
+        view.innerHTML = renderViewContent(viewId);
+        mainContent.appendChild(view);
+    }
+
+    // ============================================================
+    // PART 3: MODALS & TOASTS
+    // ============================================================
+
+    function showModal(title, content, footer = '') {
+        document.getElementById('modal-title').textContent = title;
+        document.getElementById('modal-body').innerHTML = content;
+        document.getElementById('modal-footer').innerHTML = footer || '';
+        document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function closeModal() {
+        document.getElementById('modal-overlay').classList.remove('open');
+    }
+
+    document.getElementById('modal-close').addEventListener('click', closeModal);
+    document.getElementById('modal-overlay').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('modal-overlay')) {
+            closeModal();
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeModal();
+        }
+    });
+
+    function showToast(message, type = 'success') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.animation = 'slideOutRight 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    // ============================================================
+    // PART 4: VIEW RENDERING - TO BE CONTINUED IN PART 2
+    // ============================================================
+
+    function renderViewContent(viewId) {
+        // Views will be rendered based on role
+        const role = APP_STATE.currentRole;
+
+        switch(viewId) {
+            case 'dashboard':
+                return renderDashboard(role);
+            case 'agent-registry':
+                return renderAgentRegistry(role);
+            case 'trust-trail':
+                return renderTrustTrail(role);
+            case 'wallet':
+                return renderWallet(role);
+            case 'ecosystem-map':
+                return renderEcosystemMap(role);
+            case 'analytics':
+                return renderAnalytics(role);
+            case 'coordination-hub':
+                return renderCoordinationHub(role);
+            case 'opportunities':
+                return renderOpportunities(role);
+            case 'my-engagements':
+                return renderMyEngagements(role);
+            case 'my-reputation':
+                return renderMyReputation(role);
+            case 'portfolio-overview':
+                return renderPortfolioOverview(role);
+            case 'outcome-verification':
+                return renderOutcomeVerification(role);
+            case 'compliance':
+                return renderCompliance(role);
+            case 'system-settings':
+                return renderSystemSettings(role);
+            case 'user-management':
+                return renderUserManagement(role);
+            case 'protocol-config':
+                return renderProtocolConfig(role);
+            case 'agent-approvals':
+                return renderAgentApprovals(role);
+            case 'audit-log':
+                return renderAuditLog(role);
+            case 'coalition-settings':
+                return renderCoalitionSettings(role);
+            case 'member-organizations':
+                return renderMemberOrganizations(role);
+            case 'coordinator-sync':
+                return renderCoordinatorSync(role);
+            case 'org-settings':
+                return renderOrgSettings(role);
+            case 'team-management':
+                return renderTeamManagement(role);
+            case 'budget-allocations':
+                return renderBudgetAllocations(role);
+            case 'agent-configuration':
+                return renderAgentConfiguration(role);
+            case 'grant-configuration':
+                return renderGrantConfiguration(role);
+            case 'reporting-settings':
+                return renderReportingSettings(role);
+            default:
+                return `<div class="card"><p>View not found: ${viewId}</p></div>`;
+        }
+    }
+
+    // ============================================================
+    // PART 5: DATA & HELPERS
+    // ============================================================
+
+    const DEMO_DATA = {
+        agents: [
+            { id: 'ag-1', name: 'Unite DFW Coordination Agent', type: 'Coordinator', tier: 'steward', org: 'Unite DFW', chain: 'BASE', address: '0x7a3b...f82c', attestations: 47, completed: 23 },
+            { id: 'ag-2', name: 'Workforce Analytics Agent', type: 'Analytics', tier: 'coordinator', org: 'Metro Workforce', chain: 'ETH', address: '0x2f5d...8a1e', attestations: 34, completed: 18 },
+            { id: 'ag-3', name: 'Grant Writing Agent', type: 'Content', tier: 'advisor', org: 'Legal Aid', chain: 'LINEA', address: '0x9c2a...3b5f', attestations: 28, completed: 12 },
+            { id: 'ag-4', name: 'Community Liaison Agent', type: 'Engagement', tier: 'observer', org: 'Hope House', chain: 'BASE', address: '0x1d8f...c7e2', attestations: 15, completed: 8 },
+            { id: 'ag-5', name: 'DFW Foundation Oversight', type: 'Oversight', tier: 'steward', org: 'DFW Foundation', chain: 'ETH', address: '0x5e3c...9a4d', attestations: 52, completed: 31 }
+        ],
+        organizations: [
+            { id: 'o1', name: 'Metro Workforce Alliance', sector: 'Workforce', agents: 3, engagements: 12, tier: 'coordinator' },
+            { id: 'o2', name: 'Hope House', sector: 'Housing', agents: 2, engagements: 8, tier: 'advisor' },
+            { id: 'o3', name: 'Skills Bridge Academy', sector: 'Training', agents: 2, engagements: 6, tier: 'coordinator' },
+            { id: 'o4', name: 'Metro Housing Coalition', sector: 'Housing', agents: 1, engagements: 4, tier: 'observer' },
+            { id: 'o5', name: 'DFW Youth Services', sector: 'Youth', agents: 2, engagements: 7, tier: 'advisor' },
+            { id: 'o6', name: 'Community Health Partners', sector: 'Health', agents: 1, engagements: 3, tier: 'observer' },
+            { id: 'o7', name: 'Rebuilding Together DFW', sector: 'Housing', agents: 1, engagements: 5, tier: 'advisor' },
+            { id: 'o8', name: 'North Texas Food Bank', sector: 'Food Security', agents: 2, engagements: 9, tier: 'coordinator' },
+            { id: 'o9', name: 'Legal Aid of NW Texas', sector: 'Legal Services', agents: 1, engagements: 4, tier: 'advisor' },
+            { id: 'o10', name: 'Goodwill Industries North Texas', sector: 'Employment', agents: 2, engagements: 6, tier: 'coordinator' }
+        ],
+        contributors: [
+            { id: 'c1', name: 'Priya Patel', role: 'Data Analyst', tier: 'advisor', completed: 14, wallet: '0x3e4b...2c9f' },
+            { id: 'c2', name: 'James Washington', role: 'Grant Writer', tier: 'coordinator', completed: 22, wallet: '0x8d2a...5e1c' },
+            { id: 'c3', name: 'Maria Santos', role: 'Community Liaison', tier: 'observer', completed: 7, wallet: '0x1f7c...9a3e' },
+            { id: 'c4', name: 'Arun Krishnamurthy', role: 'Program Evaluator', tier: 'advisor', completed: 18, wallet: '0x4b8e...6d5a' },
+            { id: 'c5', name: 'Lisa Thompson', role: 'Nonprofit Accountant', tier: 'coordinator', completed: 26, wallet: '0x9f2d...1b8c' },
+            { id: 'c6', name: 'Derek Okafor', role: 'Community Organizer', tier: 'observer', completed: 5, wallet: '0x3a5f...7e4d' },
+            { id: 'c7', name: 'Sarah Kim', role: 'UX Researcher', tier: 'advisor', completed: 11, wallet: '0x6c9b...3f2e' },
+            { id: 'c8', name: 'Tom Rodriguez', role: 'IT Infrastructure', tier: 'coordinator', completed: 19, wallet: '0x2e7a...8c1f' }
+        ],
+        coordinators: [
+            { id: 'co1', name: 'Sarah Chen', sector: 'Lead', focus: 'Cross-sector' },
+            { id: 'co2', name: 'Michael Brooks', sector: 'Workforce', focus: 'Job training & placement' },
+            { id: 'co3', name: 'Jennifer Osei', sector: 'Housing', focus: 'Affordable housing initiatives' },
+            { id: 'co4', name: 'Carlos Ramirez', sector: 'Youth', focus: 'Youth development programs' }
+        ],
+        opportunities: [
+            { id: 'opp1', title: 'Grant Writing for Housing Program', org: 'Hope House', duration: '3 months', budget: '$8K-12K', skills: ['Writing', 'Research'], match: 92 },
+            { id: 'opp2', title: 'Data Analysis for Workforce Program', org: 'Metro Workforce', duration: '2 months', budget: '$6K-9K', skills: ['Analytics', 'SQL'], match: 88 },
+            { id: 'opp3', title: 'Community Engagement Planning', org: 'DFW Youth Services', duration: '4 months', budget: '$10K-15K', skills: ['Facilitation', 'Planning'], match: 75 },
+            { id: 'opp4', title: 'Program Evaluation Framework', org: 'Skills Bridge Academy', duration: '2 months', budget: '$7K-10K', skills: ['Evaluation', 'Design'], match: 85 },
+            { id: 'opp5', title: 'Financial Audit Preparation', org: 'North Texas Food Bank', duration: '1 month', budget: '$5K-8K', skills: ['Accounting', 'Compliance'], match: 90 }
+        ]
+    };
+
+    function getTierBadge(tier) {
+        const tiers = {
+            'observer': 'badge-observer',
+            'advisor': 'badge-advisor',
+            'coordinator': 'badge-coordinator',
+            'steward': 'badge-steward'
+        };
+        const labels = {
+            'observer': 'Observer',
+            'advisor': 'Advisor',
+            'coordinator': 'Coordinator',
+            'steward': 'Steward'
+        };
+        return `<span class="badge ${tiers[tier] || ''}">${labels[tier] || tier}</span>`;
+    }
+
+    function getChainBadge(chain) {
+        const classes = {
+            'BASE': 'badge-base',
+            'ETH': 'badge-eth',
+            'LINEA': 'badge-linea'
+        };
+        return `<span class="badge ${classes[chain] || ''}">${chain}</span>`;
+    }
+
+    // ============================================================
+    // PART 6: DASHBOARD RENDERING
+    // ============================================================
+
+    function renderDashboard(role) {
+        switch(role) {
+            case 'admin':
+                return renderAdminDashboard();
+            case 'coordinator':
+                return renderCoordinatorDashboard();
+            case 'org_admin':
+                return renderOrgAdminDashboard();
+            case 'contributor':
+                return renderContributorDashboard();
+            case 'funder':
+                return renderFunderDashboard();
+            default:
+                return '';
+        }
+    }
+
+    function renderAdminDashboard() {
+        return `
+            <div class="stat-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Agents</div>
+                    <div class="stat-value">47</div>
+                    <div class="stat-subtext">↑ 3 this week</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active Sessions</div>
+                    <div class="stat-value">23</div>
+                    <div class="stat-subtext">↑ 5 from yesterday</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Trust Events (24h)</div>
+                    <div class="stat-value">156</div>
+                    <div class="stat-subtext">↑ 12% vs avg</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Protocol Uptime</div>
+                    <div class="stat-value">99.97%</div>
+                    <div class="stat-subtext">No incidents</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>System Alerts</h3>
+                    <div class="card-header-actions">
+                        <button class="btn btn-sm btn-secondary">Dismiss All</button>
+                    </div>
+                </div>
+                <div class="alert alert-warning">⚠️ 4 agents pending registration approval (avg review time: 2.3 hours)</div>
+                <div class="alert alert-info">ℹ️ Trust threshold breach detected: 1 agent below minimum tier requirements</div>
+                <div class="alert alert-success">✓ All smart contracts operating normally</div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Recent System Events</h3>
+                </div>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Event Type</th>
+                                <th>Agent / User</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>2026-02-20 14:32:45</td>
+                                <td>Agent Registered</td>
+                                <td>Grant Writing Agent</td>
+                                <td><span class="badge badge-status">Success</span></td>
+                            </tr>
+                            <tr>
+                                <td>2026-02-20 13:58:12</td>
+                                <td>Trust Event</td>
+                                <td>Priya Patel (Contributor)</td>
+                                <td><span class="badge badge-status">Advisor Tier</span></td>
+                            </tr>
+                            <tr>
+                                <td>2026-02-20 12:45:33</td>
+                                <td>Session Started</td>
+                                <td>Sarah Chen (Coordinator)</td>
+                                <td><span class="badge badge-status">Active</span></td>
+                            </tr>
+                            <tr>
+                                <td>2026-02-20 11:12:00</td>
+                                <td>Engagement Completed</td>
+                                <td>Hope House / Priya Patel</td>
+                                <td><span class="badge badge-status">Verified</span></td>
+                            </tr>
+                            <tr>
+                                <td>2026-02-20 09:28:17</td>
+                                <td>Agent Approval</td>
+                                <td>Community Liaison Agent</td>
+                                <td><span class="badge badge-pending">Pending</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Quick Actions</h3>
+                    </div>
+                    <button class="btn btn-primary" style="width: 100%; margin-bottom: 10px;" onclick="switchToView('agent-approvals', '✋ Agent Approvals')">Review Pending Approvals</button>
+                    <button class="btn btn-secondary" style="width: 100%; margin-bottom: 10px;">View Audit Log</button>
+                    <button class="btn btn-secondary" style="width: 100%;">Export System Report</button>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>System Health</h3>
+                    </div>
+                    <p><strong>Smart Contracts:</strong> ✓ All deployed</p>
+                    <p><strong>RPC Endpoints:</strong> ✓ All responding</p>
+                    <p><strong>Data Integrity:</strong> ✓ No issues</p>
+                    <p><strong>Trust Registry:</strong> ✓ Synced</p>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderCoordinatorDashboard() {
+        return `
+            <div class="stat-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Active Needs</div>
+                    <div class="stat-value">23</div>
+                    <div class="stat-subtext">↑ 5 this week</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Pending Matches</div>
+                    <div class="stat-value">12</div>
+                    <div class="stat-subtext">Awaiting confirmation</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Agents Online</div>
+                    <div class="stat-value">47</div>
+                    <div class="stat-subtext">100% of active</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Trust Events Today</div>
+                    <div class="stat-value">156</div>
+                    <div class="stat-subtext">↑ 12% vs yesterday</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Active Coordination Requests</h3>
+                </div>
+                <div class="grid-3">
+                    <div class="opportunity-card" onclick="showModal('Coordination Request', 'Workforce Skills Training Program<br><br>Requesting Org: Metro Workforce Alliance<br>Estimated Budget: $45K<br>Duration: 6 months<br>Priority: High<br><br><button class=\"btn btn-primary\">Approve & Match</button>')">
+                        <div class="opportunity-header">
+                            <h4>Workforce Skills Training</h4>
+                            <span class="match-indicator">8 matches</span>
+                        </div>
+                        <p class="text-sm text-muted">Metro Workforce Alliance</p>
+                        <p class="text-sm">Seeking data analysts, grant writers, evaluators</p>
+                    </div>
+                    <div class="opportunity-card" onclick="showModal('Coordination Request', 'Housing Support Program<br><br>Requesting Org: Hope House<br>Estimated Budget: $32K<br>Duration: 4 months<br>Priority: High<br><br><button class=\"btn btn-primary\">Approve & Match</button>')">
+                        <div class="opportunity-header">
+                            <h4>Housing Support Program</h4>
+                            <span class="match-indicator">5 matches</span>
+                        </div>
+                        <p class="text-sm text-muted">Hope House</p>
+                        <p class="text-sm">Community liaisons, program managers</p>
+                    </div>
+                    <div class="opportunity-card" onclick="showModal('Coordination Request', 'Youth Development Initiative<br><br>Requesting Org: DFW Youth Services<br>Estimated Budget: $55K<br>Duration: 8 months<br>Priority: Medium<br><br><button class=\"btn btn-primary\">Approve & Match</button>')">
+                        <div class="opportunity-header">
+                            <h4>Youth Development Initiative</h4>
+                            <span class="match-indicator">6 matches</span>
+                        </div>
+                        <p class="text-sm text-muted">DFW Youth Services</p>
+                        <p class="text-sm">Facilitators, curriculum designers</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Agent Activity Feed</h3>
+                </div>
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="timeline-dot" style="background-color: #28A745;"></div>
+                        <div class="timeline-content">
+                            <h5>Priya Patel completed engagement</h5>
+                            <p>Hope House Program Evaluation - Verified by Meta Hope House</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-dot" style="background-color: #F57C00;"></div>
+                        <div class="timeline-content">
+                            <h5>James Washington proposed engagement</h5>
+                            <p>Metro Workforce Grant Writing - Pending org approval</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-dot" style="background-color: #2B5797;"></div>
+                        <div class="timeline-content">
+                            <h5>New agent registered</h5>
+                            <p>Community Analytics Agent - Awaiting coordinator approval</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Coordinator Sync Alerts</h3>
+                </div>
+                <div class="alert alert-info">ℹ️ Michael Brooks is engaging contributor "Priya Patel" on Workforce Program (overlap risk)</div>
+                <div class="alert alert-success">✓ 3 active coordinators currently online</div>
+            </div>
+        `;
+    }
+
+    function renderOrgAdminDashboard() {
+        return `
+            <div class="stat-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Open Needs</div>
+                    <div class="stat-value">4</div>
+                    <div class="stat-subtext">2 actively recruiting</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active Engagements</div>
+                    <div class="stat-value">7</div>
+                    <div class="stat-subtext">In progress</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Team Members</div>
+                    <div class="stat-value">12</div>
+                    <div class="stat-subtext">4 coordinators</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Org Trust Tier</div>
+                    <div class="stat-value">Coordinator</div>
+                    <div class="stat-subtext">95% compliance</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Budget Utilization</h3>
+                </div>
+                <p style="margin-bottom: 12px;"><strong>$18,000 of $25,000 allocated</strong></p>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: 72%"></div>
+                </div>
+                <p style="margin-top: 12px; font-size: 12px; color: #666;">$7,000 remaining</p>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Active Engagements</h3>
+                </div>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Contributor</th>
+                                <th>Scope</th>
+                                <th>Status</th>
+                                <th>Progress</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Priya Patel</td>
+                                <td>Program Evaluation</td>
+                                <td><span class="badge badge-active">In Progress</span></td>
+                                <td>75%</td>
+                            </tr>
+                            <tr>
+                                <td>James Washington</td>
+                                <td>Grant Writing</td>
+                                <td><span class="badge badge-active">In Progress</span></td>
+                                <td>50%</td>
+                            </tr>
+                            <tr>
+                                <td>Lisa Thompson</td>
+                                <td>Financial Audit</td>
+                                <td><span class="badge badge-active">In Progress</span></td>
+                                <td>60%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Pending Approvals</h3>
+                    </div>
+                    <p style="margin-bottom: 12px;">2 matches awaiting org sign-off</p>
+                    <button class="btn btn-primary" style="width: 100%;">Review Matches</button>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Quick Actions</h3>
+                    </div>
+                    <button class="btn btn-primary" style="width: 100%; margin-bottom: 10px;">Post New Need</button>
+                    <button class="btn btn-secondary" style="width: 100%;">Manage Team</button>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderContributorDashboard() {
+        return `
+            <div class="stat-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Available Opportunities</div>
+                    <div class="stat-value">8</div>
+                    <div class="stat-subtext">Matching your skills</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active Engagements</div>
+                    <div class="stat-value">2</div>
+                    <div class="stat-subtext">In progress</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Completed</div>
+                    <div class="stat-value">14</div>
+                    <div class="stat-subtext">With attestations</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Reputation Tier</div>
+                    <div class="stat-value">Advisor</div>
+                    <div class="stat-subtext">↑ from Observer</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Recommended Opportunities</h3>
+                </div>
+                <div class="grid-3">
+                    <div class="opportunity-card" onclick="showModal('Opportunity Details', 'Grant Writing for Housing Program<br>Hope House<br>3 months | $8K-12K<br><br>Match: 92% (Your analytical skills align with evaluation needs)<br><br><button class=\"btn btn-success\">Apply</button>')">
+                        <div class="opportunity-header">
+                            <h4>Grant Writing</h4>
+                            <span class="match-indicator">92% Match</span>
+                        </div>
+                        <p class="text-sm text-muted">Hope House</p>
+                        <div class="opportunity-details">
+                            <span class="opportunity-detail-item">📅 3 months</span>
+                            <span class="opportunity-detail-item">💰 $8K-12K</span>
+                        </div>
+                    </div>
+                    <div class="opportunity-card" onclick="showModal('Opportunity Details', 'Data Analysis Program<br>Metro Workforce<br>2 months | $6K-9K<br><br>Match: 88% (Your analytical background)<br><br><button class=\"btn btn-success\">Apply</button>')">
+                        <div class="opportunity-header">
+                            <h4>Data Analysis</h4>
+                            <span class="match-indicator">88% Match</span>
+                        </div>
+                        <p class="text-sm text-muted">Metro Workforce</p>
+                        <div class="opportunity-details">
+                            <span class="opportunity-detail-item">📅 2 months</span>
+                            <span class="opportunity-detail-item">💰 $6K-9K</span>
+                        </div>
+                    </div>
+                    <div class="opportunity-card" onclick="showModal('Opportunity Details', 'Program Evaluation<br>Skills Bridge Academy<br>2 months | $7K-10K<br><br>Match: 85% (Your evaluation skills)<br><br><button class=\"btn btn-success\">Apply</button>')">
+                        <div class="opportunity-header">
+                            <h4>Program Evaluation</h4>
+                            <span class="match-indicator">85% Match</span>
+                        </div>
+                        <p class="text-sm text-muted">Skills Bridge Academy</p>
+                        <div class="opportunity-details">
+                            <span class="opportunity-detail-item">📅 2 months</span>
+                            <span class="opportunity-detail-item">💰 $7K-10K</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Active Engagements</h3>
+                </div>
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="timeline-dot" style="background-color: #28A745;"></div>
+                        <div class="timeline-content">
+                            <h5>Hope House - Program Evaluation (75% complete)</h5>
+                            <p>Started Jan 15 | Expected completion: Mar 15</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-dot" style="background-color: #2B5797;"></div>
+                        <div class="timeline-content">
+                            <h5>Metro Workforce - Data Analysis (40% complete)</h5>
+                            <p>Started Feb 1 | Expected completion: Apr 1</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Recent Attestations</h3>
+                </div>
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="timeline-dot" style="background-color: #7B1FA2;"></div>
+                        <div class="timeline-content">
+                            <h5>Competency Verified: Data Analysis</h5>
+                            <p>Attested by Metro Workforce Alliance - Feb 18, 2026</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-dot" style="background-color: #7B1FA2;"></div>
+                        <div class="timeline-content">
+                            <h5>Completion Verified: Community Needs Assessment</h5>
+                            <p>Attested by Hope House - Feb 15, 2026</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-dot" style="background-color: #7B1FA2;"></div>
+                        <div class="timeline-content">
+                            <h5>Tier Upgrade: Observer → Advisor</h5>
+                            <p>Auto-promoted after 10 verified engagements - Feb 10, 2026</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderFunderDashboard() {
+        return `
+            <div class="stat-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Active Grants</div>
+                    <div class="stat-value">12</div>
+                    <div class="stat-subtext">5 completing this Q</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Organizations Funded</div>
+                    <div class="stat-value">28</div>
+                    <div class="stat-subtext">Across 6 sectors</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Allocated</div>
+                    <div class="stat-value">\$2.4M</div>
+                    <div class="stat-subtext">↑ 18% YoY</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Outcomes Verified</div>
+                    <div class="stat-value">89%</div>
+                    <div class="stat-subtext">↑ from 84%</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Grant Performance by Sector</h3>
+                </div>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Sector</th>
+                                <th>Active Grants</th>
+                                <th>Total Allocated</th>
+                                <th>Outcomes %</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Workforce Development</td>
+                                <td>4</td>
+                                <td>\$580K</td>
+                                <td>92%</td>
+                            </tr>
+                            <tr>
+                                <td>Housing & Homelessness</td>
+                                <td>3</td>
+                                <td>\$750K</td>
+                                <td>88%</td>
+                            </tr>
+                            <tr>
+                                <td>Youth Services</td>
+                                <td>2</td>
+                                <td>\$380K</td>
+                                <td>85%</td>
+                            </tr>
+                            <tr>
+                                <td>Health Equity</td>
+                                <td>2</td>
+                                <td>\$410K</td>
+                                <td>91%</td>
+                            </tr>
+                            <tr>
+                                <td>Food Security</td>
+                                <td>1</td>
+                                <td>\$280K</td>
+                                <td>87%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Pending Outcome Verifications</h3>
+                </div>
+                <p style="margin-bottom: 12px;"><strong>3 attestations awaiting review</strong></p>
+                <button class="btn btn-primary">Review Verifications</button>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Compliance Status</h3>
+                    </div>
+                    <p><strong>On-Time Reports:</strong> 26/28 (93%)</p>
+                    <p><strong>Audit Ready:</strong> 25/28 (89%)</p>
+                    <p><strong>Grant Conditions Met:</strong> 27/28 (96%)</p>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Quick Actions</h3>
+                    </div>
+                    <button class="btn btn-primary" style="width: 100%; margin-bottom: 10px;">Review Portfolio</button>
+                    <button class="btn btn-secondary" style="width: 100%;">Generate Report</button>
+                </div>
+            </div>
+        `;
+    }
+
+    // ============================================================
+    // PART 7: ADDITIONAL VIEWS - PART 3 CONTINUES...
+    // ============================================================
+
+    function renderAgentRegistry(role) {
+        const agents = DEMO_DATA.agents;
+        return `
+            <div class="card">
+                <div class="card-header">
+                    <h3>Agent Registry</h3>
+                    <div class="card-header-actions">
+                        <input type="text" placeholder="Search agents..." style="padding: 6px 10px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 12px;">
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr; gap: 12px;">
+                    ${agents.map(agent => `
+                        <div class="agent-card" onclick="showAgentModal('${agent.id}')">
+                            <div class="agent-card-header">
+                                <div class="agent-avatar">${agent.name.charAt(0)}</div>
+                                <div class="agent-info">
+                                    <h4>${agent.name}</h4>
+                                    <p>${agent.type} | ${agent.org}</p>
+                                </div>
+                            </div>
+                            <div class="agent-card-badges">
+                                ${getTierBadge(agent.tier)}
+                                ${getChainBadge(agent.chain)}
+                                <span class="badge" style="background-color: #f0f0f0; color: #333;">✓ ${agent.attestations} attestations</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    function showAgentModal(agentId) {
+        const agent = DEMO_DATA.agents.find(a => a.id === agentId);
+        if (!agent) return;
+
+        const content = `
+            <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+                <div class="agent-avatar" style="width: 80px; height: 80px; font-size: 32px;">${agent.name.charAt(0)}</div>
+                <div>
+                    <h3 style="margin: 0 0 4px 0;">${agent.name}</h3>
+                    <p style="margin: 0 0 8px 0; color: #666;">${agent.type} | ${agent.org}</p>
+                    <p style="margin: 0; font-size: 12px; color: #999;">ERC-8004 Address: ${agent.address}</p>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <h4>Trust Tier</h4>
+            <p style="margin-bottom: 16px;">${getTierBadge(agent.tier)}</p>
+
+            <h4>Verified Capabilities</h4>
+            <p style="margin-bottom: 16px;">
+                • Coordination & Facilitation<br>
+                • Data Management<br>
+                • Stakeholder Engagement<br>
+                • Report Generation
+            </p>
+
+            <h4>Chain & Verification</h4>
+            <p style="margin-bottom: 16px;">
+                ${getChainBadge(agent.chain)}<br>
+                <strong>Attestation Count:</strong> ${agent.attestations}<br>
+                <strong>Completed Engagements:</strong> ${agent.completed}
+            </p>
+
+            <div class="divider"></div>
+
+            <h4>Trust Timeline</h4>
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-dot" style="background-color: #28A745;"></div>
+                    <div class="timeline-content">
+                        <h5>Registered as Steward</h5>
+                        <p>Initial registration with verified credentials - Jan 1, 2026</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot" style="background-color: #2B5797;"></div>
+                    <div class="timeline-content">
+                        <h5>10 Attestations Verified</h5>
+                        <p>Confirmed by trusted validators - Jan 15, 2026</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot" style="background-color: #7B1FA2;"></div>
+                    <div class="timeline-content">
+                        <h5>Tier Confirmed: Steward</h5>
+                        <p>Max trust level achieved - Feb 1, 2026</p>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const footer = `
+            <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            ${APP_STATE.currentRole === 'admin' || APP_STATE.currentRole === 'coordinator' ? `
+                <button class="btn btn-primary">Verify Agent</button>
+                <button class="btn btn-danger">Suspend</button>
+            ` : ''}
+        `;
+
+        showModal(`${agent.name} - Agent Details`, content, footer);
+    }
+
+    function renderTrustTrail(role) {
+        return `
+            <div class="card">
+                <div class="card-header">
+                    <h3>Trust Trail & Attestations</h3>
+                </div>
+                <div style="margin-bottom: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+                    <div class="form-group" style="margin: 0;">
+                        <label>Filter by Agent</label>
+                        <select style="padding: 8px; border: 1px solid #e0e0e0; border-radius: 4px;">
+                            <option>All Agents</option>
+                            <option>Unite DFW Coordination</option>
+                            <option>Workforce Analytics</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label>Attestation Type</label>
+                        <select style="padding: 8px; border: 1px solid #e0e0e0; border-radius: 4px;">
+                            <option>All Types</option>
+                            <option>Completion</option>
+                            <option>Capability</option>
+                            <option>Tier Upgrade</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label>Date Range</label>
+                        <select style="padding: 8px; border: 1px solid #e0e0e0; border-radius: 4px;">
+                            <option>Last 7 days</option>
+                            <option>Last 30 days</option>
+                            <option>Last 90 days</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label>Chain</label>
+                        <select style="padding: 8px; border: 1px solid #e0e0e0; border-radius: 4px;">
+                            <option>All Chains</option>
+                            <option>BASE</option>
+                            <option>ETH</option>
+                            <option>LINEA</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Agents Involved</th>
+                                <th>Attestation Type</th>
+                                <th>Chain</th>
+                                <th>Tx Hash</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>2026-02-20 14:32:45</td>
+                                <td>Priya Patel → Hope House</td>
+                                <td><span class="badge badge-status">Completion</span></td>
+                                <td>${getChainBadge('BASE')}</td>
+                                <td><code style="font-size: 11px;">0x7a3b...f82c</code></td>
+                            </tr>
+                            <tr>
+                                <td>2026-02-20 13:28:12</td>
+                                <td>James Washington</td>
+                                <td><span class="badge badge-status">Capability</span></td>
+                                <td>${getChainBadge('ETH')}</td>
+                                <td><code style="font-size: 11px;">0x2f5d...8a1e</code></td>
+                            </tr>
+                            <tr>
+                                <td>2026-02-20 12:15:33</td>
+                                <td>Priya Patel</td>
+                                <td><span class="badge badge-status">Tier Upgrade</span></td>
+                                <td>${getChainBadge('LINEA')}</td>
+                                <td><code style="font-size: 11px;">0x9c2a...3b5f</code></td>
+                            </tr>
+                            <tr>
+                                <td>2026-02-20 11:42:00</td>
+                                <td>Maria Santos → DFW Youth</td>
+                                <td><span class="badge badge-pending">Pending</span></td>
+                                <td>${getChainBadge('BASE')}</td>
+                                <td><code style="font-size: 11px;">0x1d8f...c7e2</code></td>
+                            </tr>
+                            <tr>
+                                <td>2026-02-20 10:28:17</td>
+                                <td>Arun Krishnamurthy</td>
+                                <td><span class="badge badge-status">Completion</span></td>
+                                <td>${getChainBadge('ETH')}</td>
+                                <td><code style="font-size: 11px;">0x5e3c...9a4d</code></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
+    // Placeholder functions for other views
+    function renderCoordinationHub(role) { return '<div class="card"><p>Coordination Hub - Advanced matching algorithms and coordinator collaboration tools</p></div>'; }
+    function renderOpportunities(role) { return '<div class="card"><p>Browse available opportunities</p></div>'; }
+    function renderMyEngagements(role) { return '<div class="card"><p>Your active and completed engagements</p></div>'; }
+    function renderMyReputation(role) { return '<div class="card"><p>Your trust tier, verification status, and portable reputation</p></div>'; }
+    function renderWallet(role) { return '<div class="card"><p>ERC-4337 smart wallet, session keys, escrows, and transactions</p></div>'; }
+    function renderEcosystemMap(role) { return '<div class="card"><p>Network visualization of organizations, agents, and trust relationships</p></div>'; }
+    function renderAnalytics(role) { return '<div class="card"><p>Coordination efficiency, trust growth, resource allocation analytics</p></div>'; }
+    function renderPortfolioOverview(role) { return '<div class="card"><p>Grants by sector, org performance matrix, resource flow</p></div>'; }
+    function renderOutcomeVerification(role) { return '<div class="card"><p>Attestation queue, verified outcomes history, discrepancy flags</p></div>'; }
+    function renderCompliance(role) { return '<div class="card"><p>Reporting compliance, grant conditions, audit trail</p></div>'; }
+    function renderSystemSettings(role) { return '<div class="card"><p>Protocol parameters, network configuration, feature flags</p></div>'; }
+    function renderUserManagement(role) { return '<div class="card"><p>User list, roles, status, bulk operations</p></div>'; }
+    function renderProtocolConfig(role) { return '<div class="card"><p>ERC-8004 registry, ERC-4337 factory, EAS schemas, session keys</p></div>'; }
+    function renderAgentApprovals(role) { return '<div class="card"><p>Queue of pending agent registrations with review tools</p></div>'; }
+    function renderAuditLog(role) { return '<div class="card"><p>Chronological system events, filtering, export</p></div>'; }
+    function renderCoalitionSettings(role) { return '<div class="card"><p>Coalition profile, member orgs, onboarding, trust policies</p></div>'; }
+    function renderMemberOrganizations(role) { return '<div class="card"><p>Member org list, details, onboarding workflow</p></div>'; }
+    function renderCoordinatorSync(role) { return '<div class="card"><p>Active coordinators, overlap detection, communication log</p></div>'; }
+    function renderOrgSettings(role) { return '<div class="card"><p>Organization profile, contact, privacy settings</p></div>'; }
+    function renderTeamManagement(role) { return '<div class="card"><p>Team members, invite, roles, access matrix</p></div>'; }
+    function renderBudgetAllocations(role) { return '<div class="card"><p>Budget tracking, allocations by category, history</p></div>'; }
+    function renderAgentConfiguration(role) { return '<div class="card"><p>Org agents, spending bounds, activity log</p></div>'; }
+    function renderGrantConfiguration(role) { return '<div class="card"><p>Active grants, terms, reporting requirements, metrics</p></div>'; }
+    function renderReportingSettings(role) { return '<div class="card"><p>Report templates, schedules, distribution, custom metrics</p></div>'; }
+
+    // Initialize the app
+    initializeUI();
+</script>
+
+</body>
+</html>

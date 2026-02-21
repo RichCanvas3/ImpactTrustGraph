@@ -1614,7 +1614,6 @@ export default function OnboardingPage() {
     <main
       style={{
         padding: "3rem 2rem",
-        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
         maxWidth: "48rem",
         margin: "0 auto"
       }}

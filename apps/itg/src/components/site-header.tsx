@@ -1,21 +1,17 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import {
-  AppBar,
   Avatar,
   Box,
   Button,
   CircularProgress,
-  Container,
   Divider,
-  IconButton,
   ListItemIcon,
   Menu,
   MenuItem,
   Stack,
-  Toolbar,
   Tooltip,
   Typography
 } from "@mui/material";
@@ -31,14 +27,57 @@ import { useWeb3Auth } from "./Web3AuthProvider";
 import { useStandardConnect } from "./useStandardConnect";
 import { useDefaultOrgAgent } from "./useDefaultOrgAgent";
 import { OrgAgentSelector } from "./OrgAgentSelector";
-import { sepolia } from "viem/chains";
-import { IndivService } from "../app/service/indivService";
-import { getUserProfile, getPreferredIndividualDisplayName } from "../app/service/userProfileService";
+import { getPreferredIndividualDisplayName } from "../app/service/userProfileService";
+import { useCurrentUserProfile } from "./useCurrentUserProfile";
+import type { AppRole } from "./AppShell";
+
+const ROLE_COLORS: Record<AppRole, string> = {
+  admin: "#DC3545",
+  coordinator: "#7B1FA2",
+  org_admin: "#2B5797",
+  contributor: "#28A745",
+  funder: "#F57C00",
+};
+
+function roleLabel(role: AppRole) {
+  switch (role) {
+    case "admin":
+      return "Admin";
+    case "coordinator":
+      return "Coordinator";
+    case "org_admin":
+      return "Org Admin";
+    case "contributor":
+      return "Contributor";
+    case "funder":
+      return "Grantmaker";
+  }
+}
+
+function titleForPath(pathname: string, viewParam: string | null): string {
+  if (pathname === "/") return "Home";
+  if (pathname.startsWith("/onboarding")) return "Onboarding";
+  if (pathname === "/dashboard") return "Dashboard";
+  if (pathname === "/agents") return "Agent Registry";
+  if (pathname === "/messages") return "Messages";
+  if (pathname === "/profile") return "Profile";
+  if (pathname === "/app") {
+    if (!viewParam) return "Workspace";
+    return viewParam
+      .split("-")
+      .map((w) => w.slice(0, 1).toUpperCase() + w.slice(1))
+      .join(" ");
+  }
+  return "Workspace";
+}
 
 export function SiteHeader() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { user, setUser } = useConnection();
   const { logout, web3auth } = useWeb3Auth();
+  const { walletAddress, profile, role, setRole, loading: profileLoading } = useCurrentUserProfile();
   const { 
     handleStandardConnect, 
     showOrgSelector, 
@@ -48,9 +87,8 @@ export function SiteHeader() {
   } = useStandardConnect();
   const { setDefaultOrgAgent, defaultOrgAgent } = useDefaultOrgAgent();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [roleAnchorEl, setRoleAnchorEl] = React.useState<null | HTMLElement>(null);
   const [isConnecting, setIsConnecting] = React.useState(false);
-  const [walletAddress, setWalletAddress] = React.useState<string | null>(null);
-  const [aaAddress, setAaAddress] = React.useState<string | null>(null);
   const [isSelectingAgent, setIsSelectingAgent] = React.useState(false);
   const accountDisplayName = React.useMemo(
     () => user?.name || user?.email || walletAddress || "Account",
@@ -104,72 +142,14 @@ export function SiteHeader() {
     [router]
   );
 
-  // Fetch wallet address and AA address when user is connected
-  React.useEffect(() => {
-    if (!user || !web3auth?.provider) {
-      setWalletAddress(null);
-      setAaAddress(null);
-      return;
-    }
-
-    async function fetchAddresses() {
-      try {
-        const provider = (web3auth as any).provider as
-          | { request: (args: { method: string; params?: any[] }) => Promise<any> }
-          | undefined;
-
-        if (!provider) return;
-
-        // Get EOA address
-        const accounts = await provider.request({ method: "eth_accounts" });
-        const account = Array.isArray(accounts) && accounts[0];
-        if (account && typeof account === "string") {
-          setWalletAddress(account);
-
-          // Get AA address
-          try {
-            const indivAccountClient = await IndivService.getCounterfactualAccountClientByIndividual(
-              account as `0x${string}`,
-              { ethereumProvider: provider }
-            );
-            if (indivAccountClient && typeof indivAccountClient.getAddress === "function") {
-              const addr = await indivAccountClient.getAddress();
-              if (addr && typeof addr === "string") {
-                setAaAddress(addr);
-              }
-            }
-          } catch (aaError) {
-            console.warn("Failed to get AA address in header:", aaError);
-          }
-        }
-      } catch (error) {
-        console.warn("Failed to fetch addresses in header:", error);
-      }
-    }
-
-    void fetchAddresses();
-  }, [user, web3auth]);
-
   // If profile has first/last name, use it as the display name.
   React.useEffect(() => {
-    if (!user || !walletAddress) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const profile = await getUserProfile(undefined, walletAddress);
-        if (cancelled || !profile) return;
-        const preferred = getPreferredIndividualDisplayName(profile);
-        if (preferred && preferred !== user.name) {
-          setUser({ ...user, name: preferred });
-        }
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user, walletAddress, setUser]);
+    if (!user || !profile) return;
+    const preferred = getPreferredIndividualDisplayName(profile);
+    if (preferred && preferred !== user.name) {
+      setUser({ ...user, name: preferred });
+    }
+  }, [user, profile, setUser]);
 
   // When the org selector closes (after selection or cancel), clear the "selecting" spinner
   React.useEffect(() => {
@@ -177,6 +157,11 @@ export function SiteHeader() {
       setIsSelectingAgent(false);
     }
   }, [showOrgSelector]);
+
+  const headerTitle = React.useMemo(() => {
+    const viewParam = searchParams?.get("view");
+    return titleForPath(pathname, viewParam);
+  }, [pathname, searchParams]);
 
   return (
     <>
@@ -187,149 +172,164 @@ export function SiteHeader() {
           onCancel={onCancelOrgSelect}
         />
       )}
-      <AppBar
-      position="sticky"
-      elevation={1}
-      sx={(theme) => ({
-        borderBottom: `1px solid ${theme.palette.divider}`,
-        background: `linear-gradient(90deg, ${theme.palette.primary.main}, #0b2846)`
-      })}
-    >
-      <Toolbar disableGutters>
-        <Container
-          maxWidth="lg"
-          sx={{
+      <Box
+        sx={{
+          height: 64,
+          px: { xs: 2, md: 4 },
           display: "flex",
           alignItems: "center",
-            justifyContent: "space-between"
+          justifyContent: "space-between",
+          gap: 2,
         }}
       >
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
-            
-            <Box>
-              <Typography
-                variant="h6"
-                component="div"
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
+          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            <strong style={{ color: "#333" }}>{headerTitle}</strong>
+          </Typography>
+        </Box>
+
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          {user ? (
+            <Box
+              sx={{
+                fontSize: 12,
+                px: 1.5,
+                py: 0.75,
+                borderRadius: 999,
+                bgcolor: "#f0f0f0",
+                color: "secondary.main",
+                fontWeight: 600,
+                display: { xs: "none", sm: "block" },
+              }}
+            >
+              🔗 Connected via Web3Auth
+            </Box>
+          ) : null}
+
+          {/* Role switcher */}
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={!user || profileLoading}
+            onClick={(e) => setRoleAnchorEl(e.currentTarget)}
+            sx={{
+              bgcolor: "background.default",
+              borderColor: "divider",
+              textTransform: "none",
+              fontWeight: 600,
+              borderRadius: 1.5,
+              px: 1.5,
+            }}
+            startIcon={
+              <Box
                 sx={{
-                  fontSize: 18,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase"
+                  width: 10,
+                  height: 10,
+                  borderRadius: "50%",
+                  bgcolor: role ? ROLE_COLORS[role] : "grey.400",
+                }}
+              />
+            }
+            endIcon={profileLoading ? <CircularProgress size={14} /> : <KeyboardArrowDownIcon sx={{ fontSize: 18 }} />}
+          >
+            {role ? roleLabel(role) : "Role"}
+          </Button>
+          <Menu
+            anchorEl={roleAnchorEl}
+            open={Boolean(roleAnchorEl)}
+            onClose={() => setRoleAnchorEl(null)}
+            anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+            transformOrigin={{ vertical: "top", horizontal: "right" }}
+            PaperProps={{ sx: { mt: 1, minWidth: 220 } }}
+          >
+            {(["admin", "coordinator", "org_admin", "contributor", "funder"] as AppRole[]).map((r) => (
+              <MenuItem
+                key={r}
+                selected={role === r}
+                onClick={async () => {
+                  try {
+                    await setRole(r);
+                  } finally {
+                    setRoleAnchorEl(null);
+                  }
                 }}
               >
-              Impact Trust Graph
-              </Typography>
-            </Box>
-          </Box>
+                <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: ROLE_COLORS[r], mr: 1.25 }} />
+                {roleLabel(r)}
+              </MenuItem>
+            ))}
+          </Menu>
 
-          <Box sx={{ fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 2 }}>
-            {/* Default agent indicator + quick switcher */}
-            {user && defaultOrgAgent && (
-              <Tooltip title="Switch default agent">
-                <span>
-                  <Button
-                    color="secondary"
-                    size="small"
-                    variant="contained"
-                    onClick={() => {
-                      if (isSelectingAgent) return;
-                      setIsSelectingAgent(true);
-                      void handleStandardConnect().catch((err) => {
-                        console.error("[site-header] Failed to open org selector from default agent button:", err);
-                        setIsSelectingAgent(false);
-                      });
-                    }}
-                    startIcon={
-                      <Avatar
-                        sx={{
-                          width: 28,
-                          height: 28,
-                          fontSize: 13,
-                          bgcolor: "rgba(255,255,255,0.2)",
-                          color: "white",
-                        }}
-                      >
-                        {(defaultOrgAgent.name || defaultOrgAgent.agentName || "A").slice(0, 2).toUpperCase()}
-                      </Avatar>
-                    }
-                    endIcon={
-                      isSelectingAgent ? (
-                        <CircularProgress size={14} sx={{ color: "white" }} />
-                      ) : (
-                        <KeyboardArrowDownIcon sx={{ fontSize: 18 }} />
-                      )
-                    }
-                    sx={{
-                      textTransform: "none",
-                      fontWeight: 500,
-                      px: 2,
-                      boxShadow: "none",
-                      "&:hover": {
-                        boxShadow: "none",
-                        backgroundColor: "rgba(255,255,255,0.18)",
-                      },
-                      opacity: isSelectingAgent ? 0.8 : 1,
-                    }}
-                    disabled={isSelectingAgent}
+          {/* Default agent indicator + quick switcher */}
+          {user && defaultOrgAgent ? (
+            <Tooltip title="Switch default agent">
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => {
+                    if (isSelectingAgent) return;
+                    setIsSelectingAgent(true);
+                    void handleStandardConnect().catch((err) => {
+                      console.error("[site-header] Failed to open org selector from default agent button:", err);
+                      setIsSelectingAgent(false);
+                    });
+                  }}
+                  startIcon={
+                    <Avatar
+                      sx={{
+                        width: 26,
+                        height: 26,
+                        fontSize: 12,
+                        bgcolor: "rgba(43,87,151,0.12)",
+                        color: "primary.main",
+                      }}
+                    >
+                      {(defaultOrgAgent.name || defaultOrgAgent.agentName || "A").slice(0, 2).toUpperCase()}
+                    </Avatar>
+                  }
+                  endIcon={isSelectingAgent ? <CircularProgress size={14} /> : <KeyboardArrowDownIcon sx={{ fontSize: 18 }} />}
+                  sx={{
+                    textTransform: "none",
+                    fontWeight: 600,
+                    bgcolor: "background.default",
+                    borderColor: "divider",
+                    borderRadius: 1.5,
+                    maxWidth: 240,
+                    justifyContent: "space-between",
+                    opacity: isSelectingAgent ? 0.8 : 1,
+                  }}
+                  disabled={isSelectingAgent}
+                >
+                  <Typography
+                    variant="body2"
+                    noWrap
+                    sx={{ maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" }}
                   >
-                    <Stack spacing={0} alignItems="flex-start">
-                      <Typography variant="caption" sx={{ opacity: 0.8, fontSize: "0.7rem" }}>
-                        Default agent
-                      </Typography>
-                      <Typography
-                        variant="body2"
-                        noWrap
-                        sx={{ maxWidth: 200, fontWeight: 600 }}
-                      >
-                        {defaultOrgAgent.name ||
-                          defaultOrgAgent.agentName ||
-                          defaultOrgAgent.ensName}
-                      </Typography>
-                    </Stack>
-                  </Button>
-                </span>
-              </Tooltip>
-            )}
+                    {defaultOrgAgent.name || defaultOrgAgent.agentName || defaultOrgAgent.ensName}
+                  </Typography>
+                </Button>
+              </span>
+            </Tooltip>
+          ) : null}
 
           {!user ? (
-              <Button
-                color="inherit"
-                variant="outlined"
-                size="small"
+            <Button
+              variant="contained"
+              size="small"
               onClick={async () => {
                 if (!web3auth) return;
                 setIsConnecting(true);
                 try {
                   const result = await handleStandardConnect();
-                  
-                  // If agent exists and needs selection, the selector will be shown via showOrgSelector state
-                  if (result?.hasAgent && result?.needsSelection) {
-                    // Selector is shown via showOrgSelector state - don't do anything else
-                    setIsConnecting(false);
-                    return;
-                  }
-                  
-                  // If agent exists but no selection needed, wait a moment for default agent to be set
+                  if (result?.hasAgent && result?.needsSelection) return;
                   if (result?.hasAgent && !result?.needsSelection) {
-                    // Wait a moment for default agent to be set from localStorage
                     await new Promise((resolve) => setTimeout(resolve, 300));
-                    
-                    // Check if default agent is set (might be in localStorage but not yet in state)
-                    const stored = typeof window !== "undefined" 
-                      ? localStorage.getItem("itg_default_org_agent") 
-                      : null;
-                    
-                    if (!defaultOrgAgent && !stored) {
-                      // Agent exists but no default set - redirect to onboarding to set it up
-                      router.push("/onboarding");
-                    }
-                    setIsConnecting(false);
+                    const stored = typeof window !== "undefined" ? localStorage.getItem("itg_default_org_agent") : null;
+                    if (!defaultOrgAgent && !stored) router.push("/onboarding");
                     return;
                   }
-                  
-                  // No agent found - redirect to onboarding
-                  if (!result?.hasAgent) {
-                    router.push("/onboarding");
-                  }
+                  if (!result?.hasAgent) router.push("/onboarding");
                 } catch (e) {
                   console.error(e);
                 } finally {
@@ -337,151 +337,87 @@ export function SiteHeader() {
                 }
               }}
               disabled={!web3auth || isConnecting}
-                sx={{
-                  borderColor: "rgba(255,255,255,0.75)",
-                  color: "white",
-                  px: 2.25,
-                  "&:hover": {
-                    borderColor: "white",
-                    backgroundColor: "rgba(255,255,255,0.04)"
-                  }
-                }}
-              >
-                {isConnecting ? "Connecting…" : "Connect"}
-              </Button>
-            ) : (
-              <>
-                <Button
-                  color="inherit"
-                  variant="contained"
-                  size="small"
-                  onClick={(event) => setAnchorEl(event.currentTarget)}
-                  startIcon={
-                    <Avatar
-                      sx={{
-                        width: 30,
-                        height: 30,
-                        bgcolor: "rgba(255,255,255,0.2)",
-                        color: "white",
-                        fontSize: 14,
-                      }}
-                    >
-                      {accountInitial}
-                    </Avatar>
-                  }
-                  endIcon={<KeyboardArrowDownIcon sx={{ fontSize: 18 }} />}
-                  sx={{
-                    bgcolor: "rgba(255,255,255,0.08)",
-                    borderRadius: 999,
-                    px: 1.5,
-                    boxShadow: "none",
-                    "&:hover": { bgcolor: "rgba(255,255,255,0.16)", boxShadow: "none" },
-                    maxWidth: 260,
-                    justifyContent: "space-between",
-                    textTransform: "none",
-                  }}
-                >
-                  <Typography
-                    variant="body2"
+              sx={{ borderRadius: 1.5, px: 2 }}
+            >
+              {isConnecting ? "Connecting…" : "Connect"}
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={(event) => setAnchorEl(event.currentTarget)}
+                startIcon={
+                  <Avatar
                     sx={{
-                      maxWidth: 170,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      textAlign: "left",
-                      fontWeight: 600,
+                      width: 26,
+                      height: 26,
+                      bgcolor: "rgba(43,87,151,0.12)",
+                      color: "primary.main",
+                      fontSize: 13,
                     }}
                   >
-                    {accountDisplayName}
-                  </Typography>
-                </Button>
-                <Menu
-                  anchorEl={anchorEl}
-                  open={Boolean(anchorEl)}
-                  onClose={() => setAnchorEl(null)}
-                  anchorOrigin={{
-                    vertical: "bottom",
-                    horizontal: "right"
-                  }}
-                  transformOrigin={{
-                    vertical: "top",
-                    horizontal: "right"
-                  }}
-                  PaperProps={{
-                    sx: {
-                      mt: 1,
-                      minWidth: 280
-                    }
+                    {accountInitial}
+                  </Avatar>
+                }
+                endIcon={<KeyboardArrowDownIcon sx={{ fontSize: 18 }} />}
+                sx={{
+                  bgcolor: "background.default",
+                  borderColor: "divider",
+                  borderRadius: 1.5,
+                  px: 1.5,
+                  maxWidth: 260,
+                  justifyContent: "space-between",
+                  textTransform: "none",
+                  fontWeight: 700,
+                }}
+              >
+                <Typography
+                  variant="body2"
+                  sx={{
+                    maxWidth: 170,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    textAlign: "left",
+                    fontWeight: 700,
                   }}
                 >
-                  {walletAddress && (
-                    <Box
-                      sx={{
-                        px: 2,
-                        py: 1.5,
-                        borderBottom: "1px solid",
-                        borderColor: "divider",
-                      }}
-                    >
-                      <Typography variant="caption" sx={{ opacity: 0.65, mb: 0.5 }}>
-                        Wallet
-                      </Typography>
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          fontFamily:
-                            "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
-                          fontSize: "0.75rem",
-                        }}
-                      >
-                        {walletAddress}
-                      </Typography>
-                      {aaAddress && (
-                        <>
-                          <Typography variant="caption" sx={{ opacity: 0.65, mt: 1, mb: 0.5 }}>
-                            Smart account
-                          </Typography>
-                          <Typography
-                            variant="body2"
-                            sx={{
-                              fontFamily:
-                                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace",
-                              fontSize: "0.75rem",
-                            }}
-                          >
-                            {aaAddress}
-                          </Typography>
-                        </>
-                      )}
-                    </Box>
-                  )}
-                  {menuItems.map((item) => (
-                    <MenuItem
-                      key={item.path}
-                      onClick={() => handleNavigate(item.path)}
-                      sx={{ py: 1 }}
-                    >
-                      <ListItemIcon sx={{ minWidth: 32 }}>{item.icon}</ListItemIcon>
-                      <Typography variant="body2">{item.label}</Typography>
-                    </MenuItem>
-                  ))}
-                  <Divider />
-                  <MenuItem
-                    onClick={handleDisconnect}
-                    sx={{ color: (theme) => theme.palette.error.main, py: 1 }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 32 }}>
-                      <LogoutIcon fontSize="small" color="error" />
-                    </ListItemIcon>
-                    Disconnect
+                  {accountDisplayName}
+                </Typography>
+              </Button>
+              <Menu
+                anchorEl={anchorEl}
+                open={Boolean(anchorEl)}
+                onClose={() => setAnchorEl(null)}
+                anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+                transformOrigin={{ vertical: "top", horizontal: "right" }}
+                PaperProps={{ sx: { mt: 1, minWidth: 260 } }}
+              >
+                {menuItems.map((item) => (
+                  <MenuItem key={item.path} onClick={() => handleNavigate(item.path)} sx={{ py: 1 }}>
+                    <ListItemIcon sx={{ minWidth: 32 }}>{item.icon}</ListItemIcon>
+                    <Typography variant="body2">{item.label}</Typography>
                   </MenuItem>
-                </Menu>
-              </>
-              )}
-          </Box>
-        </Container>
-      </Toolbar>
-    </AppBar>
+                ))}
+                <MenuItem onClick={() => handleNavigate("/onboarding")} sx={{ py: 1 }}>
+                  <ListItemIcon sx={{ minWidth: 32 }}>
+                    <WorkOutlineIcon fontSize="small" />
+                  </ListItemIcon>
+                  <Typography variant="body2">Onboarding</Typography>
+                </MenuItem>
+                <Divider />
+                <MenuItem onClick={handleDisconnect} sx={{ color: (theme) => theme.palette.error.main, py: 1 }}>
+                  <ListItemIcon sx={{ minWidth: 32 }}>
+                    <LogoutIcon fontSize="small" color="error" />
+                  </ListItemIcon>
+                  Disconnect
+                </MenuItem>
+              </Menu>
+            </>
+          )}
+        </Box>
+      </Box>
     </>
   );
 }
