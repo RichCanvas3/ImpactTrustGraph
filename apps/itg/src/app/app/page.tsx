@@ -117,7 +117,7 @@ export default function ApplicationEnvironmentPage() {
   const [error, setError] = React.useState<string | null>(null);
 
   const { walletAddress, profile, role, loading: profileLoading, hasHydrated } = useCurrentUserProfile();
-  const { defaultOrgAgent } = useDefaultOrgAgent();
+  const { defaultOrgAgent, setDefaultOrgAgent } = useDefaultOrgAgent();
   const profileRole = React.useMemo(() => (typeof profile?.role === "string" ? profile.role : null), [profile?.role]);
   const individualId = React.useMemo(() => {
     const raw = (profile as any)?.id;
@@ -157,14 +157,56 @@ export default function ApplicationEnvironmentPage() {
         const agentNameRaw = typeof defaultOrgAgent?.agentName === "string" ? defaultOrgAgent.agentName.trim() : "";
         const agentName = agentNameRaw || (ens ? String(ens.split(".")[0] || "").trim() : "");
         if (ens && agentName) {
+          const resolvedChainId = typeof defaultOrgAgent?.chainId === "number" ? defaultOrgAgent.chainId : 11155111;
+          let resolvedAccount =
+            typeof defaultOrgAgent?.agentAccount === "string" ? defaultOrgAgent.agentAccount.trim() : "";
+          let uaidValue = typeof (defaultOrgAgent as any)?.uaid === "string" ? String((defaultOrgAgent as any).uaid).trim() : "";
+
+          // UAID is canonical. If missing, hydrate via ENS → AA account → by-account (KB).
+          if (!uaidValue) {
+            if (!resolvedAccount) {
+              const didEns = `did:ens:${resolvedChainId}:${ens}`;
+              const ensResp = await fetch(`/api/names/${encodeURIComponent(didEns)}`, { signal: ac.signal });
+              const ensData = ensResp.ok ? await ensResp.json().catch(() => null) : null;
+              const acct = ensData?.nameInfo?.account;
+              if (typeof acct === "string" && acct.startsWith("0x")) resolvedAccount = acct.trim();
+            }
+            if (resolvedAccount) {
+              const didEthr = `did:ethr:${resolvedChainId}:${resolvedAccount}`;
+              const agentResp = await fetch(`/api/agents/by-account/${encodeURIComponent(didEthr)}`, { signal: ac.signal });
+              const agentData = agentResp.ok ? await agentResp.json().catch(() => null) : null;
+              const discoveredUaid =
+                agentData && agentData.found === true && typeof agentData.uaid === "string" && agentData.uaid.trim()
+                  ? String(agentData.uaid).trim()
+                  : null;
+              if (discoveredUaid) uaidValue = discoveredUaid;
+            }
+          }
+          if (!uaidValue) {
+            throw new Error("Missing UAID for selected organization agent (unable to hydrate). Re-select the org agent.");
+          }
+
+          // Self-heal stored default org agent with canonical UAID.
+          if (defaultOrgAgent && typeof (defaultOrgAgent as any)?.uaid !== "string") {
+            try {
+              setDefaultOrgAgent({
+                ...(defaultOrgAgent as any),
+                uaid: uaidValue,
+                ...(resolvedAccount ? { agentAccount: resolvedAccount } : {}),
+              } as any);
+            } catch {
+              // ignore
+            }
+          }
+
           await upsertUserOrganizationByIndividualId({
             individual_id: individualId,
             ens_name: ens,
             agent_name: agentName,
             org_name: typeof defaultOrgAgent?.name === "string" ? defaultOrgAgent.name : null,
-            agent_account: typeof defaultOrgAgent?.agentAccount === "string" ? defaultOrgAgent.agentAccount : null,
-            uaid: typeof (defaultOrgAgent as any)?.uaid === "string" ? (defaultOrgAgent as any).uaid : null,
-            chain_id: typeof defaultOrgAgent?.chainId === "number" ? defaultOrgAgent.chainId : null,
+            agent_account: resolvedAccount || null,
+            uaid: uaidValue,
+            chain_id: resolvedChainId,
             is_primary: true,
             role: profileRole,
           });
@@ -190,7 +232,7 @@ export default function ApplicationEnvironmentPage() {
       // allow retry after abort (connect/select races)
       orgFetchKeyRef.current = null;
     };
-  }, [isConnected, individualId, defaultOrgAgent?.ensName, profileRole]);
+  }, [isConnected, individualId, defaultOrgAgent?.ensName, profileRole, defaultOrgAgent, setDefaultOrgAgent]);
 
   const primaryOrg = React.useMemo(() => {
     const list = Array.isArray(orgs) ? orgs : [];

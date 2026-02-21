@@ -125,6 +125,9 @@ export async function associateUserWithOrganization(
   email: string,
   organization: OrganizationAssociation
 ): Promise<void> {
+  if (!organization.uaid || typeof organization.uaid !== "string" || !organization.uaid.trim()) {
+    throw new Error("Missing uaid for organization agent (UAID is the canonical identifier).");
+  }
   const response = await fetch('/api/users/organizations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -149,6 +152,9 @@ export async function associateUserWithOrganizationByEoa(
   organization: OrganizationAssociation,
   email?: string | null,
 ): Promise<void> {
+  if (!organization.uaid || typeof organization.uaid !== "string" || !organization.uaid.trim()) {
+    throw new Error("Missing uaid for organization agent (UAID is the canonical identifier).");
+  }
   const response = await fetch('/api/users/organizations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -209,11 +215,17 @@ export async function upsertUserOrganizationByIndividualId(input: {
   org_address?: string | null;
   org_type?: string | null;
   agent_account?: string | null;
-  uaid?: string | null;
+  uaid: string;
   chain_id?: number | null;
+  session_package?: string | null;
+  agent_card_json?: string | null;
+  org_metadata?: string | null;
   is_primary?: boolean;
   role?: string | null;
 }): Promise<void> {
+  if (!input.uaid || typeof input.uaid !== "string" || !input.uaid.trim()) {
+    throw new Error("Missing uaid for organization agent (UAID is the canonical identifier).");
+  }
   const response = await fetch('/api/users/organizations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

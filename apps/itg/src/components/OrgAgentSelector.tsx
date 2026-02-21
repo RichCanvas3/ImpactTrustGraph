@@ -31,6 +31,7 @@ export function OrgAgentSelector({ organizations, onSelect, onCancel }: OrgAgent
       description: undefined,
       image: undefined,
       agentUrl: undefined,
+      uaid: selectedOrg.uaid ?? undefined,
     };
 
     onSelect(defaultAgent);

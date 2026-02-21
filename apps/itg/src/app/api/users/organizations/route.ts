@@ -239,10 +239,11 @@ export async function POST(request: NextRequest) {
       typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
     const cleanedEoa =
       typeof eoa_address === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa_address) ? eoa_address : null;
+    const uaidValue = typeof uaid === "string" && uaid.trim() ? uaid.trim() : null;
 
-    if ((!individualIdFromBody && !cleanedEmail && !cleanedEoa) || !ens_name || !agent_name) {
+    if ((!individualIdFromBody) || !uaidValue) {
       return NextResponse.json(
-        { error: 'Missing required fields: (individualId or email or eoa_address), ens_name, agent_name' },
+        { error: 'Missing required fields: (individualId), uaid' },
         { status: 400 }
       );
     }
@@ -312,13 +313,14 @@ export async function POST(request: NextRequest) {
       // Upsert canonical agents row (best-effort) and capture id for FK.
       let agentRowId: number | null = null;
       try {
-        const existingAgent = typeof uaid === "string" && uaid
-          ? await db.prepare("SELECT id FROM agents WHERE uaid = ?").bind(uaid).first<{ id: number }>()
-          : await db.prepare("SELECT id FROM agents WHERE ens_name = ? AND chain_id = ?").bind(ens_name, resolvedChainId).first<{ id: number }>();
+        const existingAgent = await db
+          .prepare("SELECT id FROM agents WHERE uaid = ?")
+          .bind(uaidValue)
+          .first<{ id: number }>();
         if (existingAgent?.id) {
           await db.prepare(
             `UPDATE agents
-             SET uaid = COALESCE(?, uaid),
+             SET uaid = ?,
                  ens_name = COALESCE(?, ens_name),
                  agent_name = COALESCE(?, agent_name),
                  email_domain = COALESCE(?, email_domain),
@@ -329,7 +331,7 @@ export async function POST(request: NextRequest) {
                  updated_at = ?
              WHERE id = ?`,
           ).bind(
-            typeof uaid === "string" ? uaid : null,
+            uaidValue,
             ens_name,
             agent_name,
             resolvedEmailDomain,
@@ -347,7 +349,7 @@ export async function POST(request: NextRequest) {
              (uaid, ens_name, agent_name, email_domain, agent_account, chain_id, session_package, agent_card_json, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).bind(
-            typeof uaid === "string" ? uaid : null,
+            uaidValue,
             ens_name,
             agent_name,
             resolvedEmailDomain,
@@ -377,7 +379,7 @@ export async function POST(request: NextRequest) {
         org_type || null,
         resolvedEmailDomain,
         agent_account || null,
-        typeof uaid === "string" ? uaid : null,
+        uaidValue,
         agentRowId,
         resolvedChainId,
         typeof session_package === "string" ? session_package : null,
@@ -395,13 +397,14 @@ export async function POST(request: NextRequest) {
       let agentRowId: number | null = null;
       try {
         const resolvedChainId = chain_id || 11155111;
-        const existingAgent = typeof uaid === "string" && uaid
-          ? await db.prepare("SELECT id FROM agents WHERE uaid = ?").bind(uaid).first<{ id: number }>()
-          : await db.prepare("SELECT id FROM agents WHERE ens_name = ? AND chain_id = ?").bind(ens_name, resolvedChainId).first<{ id: number }>();
+        const existingAgent = await db
+          .prepare("SELECT id FROM agents WHERE uaid = ?")
+          .bind(uaidValue)
+          .first<{ id: number }>();
         if (existingAgent?.id) {
           await db.prepare(
             `UPDATE agents
-             SET uaid = COALESCE(?, uaid),
+             SET uaid = ?,
                  ens_name = COALESCE(?, ens_name),
                  agent_name = COALESCE(?, agent_name),
                  email_domain = COALESCE(?, email_domain),
@@ -412,7 +415,7 @@ export async function POST(request: NextRequest) {
                  updated_at = ?
              WHERE id = ?`,
           ).bind(
-            typeof uaid === "string" ? uaid : null,
+            uaidValue,
             ens_name,
             agent_name,
             resolvedEmailDomain,
@@ -430,7 +433,7 @@ export async function POST(request: NextRequest) {
              (uaid, ens_name, agent_name, email_domain, agent_account, chain_id, session_package, agent_card_json, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).bind(
-            typeof uaid === "string" ? uaid : null,
+            uaidValue,
             ens_name,
             agent_name,
             resolvedEmailDomain,
@@ -450,7 +453,7 @@ export async function POST(request: NextRequest) {
       await db.prepare(
         `UPDATE organizations 
          SET agent_name = ?, org_name = ?, org_address = ?, org_type = ?, 
-             agent_account = ?, uaid = COALESCE(?, uaid), agent_row_id = COALESCE(?, agent_row_id),
+             agent_account = ?, uaid = ?, agent_row_id = COALESCE(?, agent_row_id),
              session_package = COALESCE(?, session_package),
              org_metadata = COALESCE(?, org_metadata), updated_at = ?
          WHERE ens_name = ?`
@@ -460,7 +463,7 @@ export async function POST(request: NextRequest) {
         org_address || null,
         org_type || null,
         agent_account || null,
-        typeof uaid === "string" ? uaid : null,
+        uaidValue,
         agentRowId,
         typeof session_package === "string" ? session_package : null,
         typeof org_metadata === "string" ? org_metadata : null,

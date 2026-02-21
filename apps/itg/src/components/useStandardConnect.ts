@@ -15,6 +15,7 @@ import {
   getUserOrganizationsByEoa,
   getUserProfile,
   getPreferredIndividualDisplayName,
+  upsertUserOrganizationByIndividualId,
 } from "../app/service/userProfileService";
 import { useDefaultOrgAgent, type DefaultOrgAgent } from "./useDefaultOrgAgent";
 import { OrgAgentSelector } from "./OrgAgentSelector";
@@ -36,6 +37,7 @@ export function useStandardConnect() {
   const [showOrgSelector, setShowOrgSelector] = useState(false);
   const [availableOrgs, setAvailableOrgs] = useState<any[]>([]);
   const [pendingIndivAaAddress, setPendingIndivAaAddress] = useState<string | null>(null);
+  const [pendingIndividualId, setPendingIndividualId] = useState<number | null>(null);
 
   // Helper function to set agent from organization
   // This updates the user profile and can optionally set the default agent
@@ -49,11 +51,15 @@ export function useStandardConnect() {
   ) => {
     try {
       // Update user profile with addresses
-      await saveUserProfile({
+      const saved = await saveUserProfile({
         email,
         eoa_address: account,
         aa_address: indivAaAddress || null,
       });
+      const savedId = (saved as any)?.id;
+      if (typeof savedId === "number" && Number.isFinite(savedId) && savedId > 0) {
+        setPendingIndividualId(savedId);
+      }
 
       // Only fetch and set agent if not skipping
       if (!skipSetDefaultAgent) {
@@ -76,6 +82,14 @@ export function useStandardConnect() {
                 const agentResult = await agentResponse.json();
                 if (agentResult?.found === true) {
                   const { found, ...agentData } = agentResult;
+                  const uaid =
+                    typeof (agentResult as any)?.uaid === "string" && String((agentResult as any).uaid).trim()
+                      ? String((agentResult as any).uaid).trim()
+                      : typeof (agentData as any)?.uaid === "string" && String((agentData as any).uaid).trim()
+                        ? String((agentData as any).uaid).trim()
+                        : typeof (agentData as any)?.agent?.uaid === "string" && String((agentData as any).agent.uaid).trim()
+                          ? String((agentData as any).agent.uaid).trim()
+                          : null;
                   const defaultAgent: DefaultOrgAgent = {
                     ensName,
                     agentName: org.agent_name,
@@ -90,6 +104,7 @@ export function useStandardConnect() {
                     metadata: agentData.metadata,
                     did: agentData.did,
                     a2aEndpoint: agentData.a2aEndpoint,
+                    ...(uaid ? { uaid } : {}),
                     ...agentData,
                   };
 
@@ -109,6 +124,7 @@ export function useStandardConnect() {
           agentName: org.agent_name,
           agentAccount: org.agent_account || "",
           chainId: org.chain_id || sepolia.id,
+          ...(typeof org?.uaid === "string" && org.uaid.trim() ? { uaid: org.uaid.trim() } : {}),
         });
       }
     }
@@ -341,6 +357,14 @@ export function useStandardConnect() {
                         console.info(" ********** agent result: ", agentResult);
                         if (agentResult?.found === true) {
                           const { found, ...agentData } = agentResult;
+                          const uaid =
+                            typeof (agentResult as any)?.uaid === "string" && String((agentResult as any).uaid).trim()
+                              ? String((agentResult as any).uaid).trim()
+                              : typeof (agentData as any)?.uaid === "string" && String((agentData as any).uaid).trim()
+                                ? String((agentData as any).uaid).trim()
+                                : typeof (agentData as any)?.agent?.uaid === "string" && String((agentData as any).agent.uaid).trim()
+                                  ? String((agentData as any).agent.uaid).trim()
+                                  : null;
                           const defaultAgent: DefaultOrgAgent = {
                             ensName,
                             agentName,
@@ -355,6 +379,7 @@ export function useStandardConnect() {
                             metadata: agentData.metadata,
                             did: agentData.did,
                             a2aEndpoint: agentData.a2aEndpoint,
+                            ...(uaid ? { uaid } : {}),
                             ...agentData,
                           };
 
@@ -544,6 +569,11 @@ export function useStandardConnect() {
     // Fetch full agent details before setting as default
     // This ensures we have all required fields (agentId, did, etc.)
     let fullAgent: DefaultOrgAgent = agent;
+    let discoveredUaid: string | null =
+      typeof (agent as any)?.uaid === "string" && String((agent as any).uaid).trim()
+        ? String((agent as any).uaid).trim()
+        : null;
+    let agentCardJsonToPersist: string | null = null;
     
     try {
       // First, try to get agent account from ENS if not available in selectedOrg
@@ -574,6 +604,15 @@ export function useStandardConnect() {
           const agentResult = await agentResponse.json();
           if (agentResult?.found === true) {
             const { found, ...agentData } = agentResult;
+            discoveredUaid =
+              typeof (agentResult as any)?.uaid === "string" && String((agentResult as any).uaid).trim()
+                ? String((agentResult as any).uaid).trim()
+                : typeof (agentData as any)?.uaid === "string" && String((agentData as any).uaid).trim()
+                  ? String((agentData as any).uaid).trim()
+                  : typeof (agentData as any)?.agent?.uaid === "string" && String((agentData as any).agent.uaid).trim()
+                    ? String((agentData as any).agent.uaid).trim()
+                    : discoveredUaid;
+            agentCardJsonToPersist = JSON.stringify(agentResult);
             // Merge the full agent data with the basic agent info
             fullAgent = {
               ...agent,
@@ -588,6 +627,7 @@ export function useStandardConnect() {
               metadata: agentData.metadata,
               did: agentData.did,
               a2aEndpoint: agentData.a2aEndpoint,
+              ...(discoveredUaid ? { uaid: discoveredUaid } : {}),
               ...agentData,
             };
             console.info("[useStandardConnect] Fetched full agent details:", {
@@ -645,6 +685,49 @@ export function useStandardConnect() {
       did: fullAgent.did,
     });
     setDefaultOrgAgent(fullAgent);
+
+    // Persist org association + canonical agent row using UAID (canonical identifier).
+    try {
+      const effectiveUaid =
+        typeof (fullAgent as any)?.uaid === "string" && String((fullAgent as any).uaid).trim()
+          ? String((fullAgent as any).uaid).trim()
+          : discoveredUaid;
+      if (!effectiveUaid) {
+        throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
+      }
+
+      let individualId: number | null = pendingIndividualId;
+      if (!individualId && account) {
+        const p = await getUserProfile(undefined, account);
+        const pid = (p as any)?.id;
+        if (typeof pid === "number" && Number.isFinite(pid) && pid > 0) individualId = pid;
+      }
+      if (!individualId) {
+        throw new Error("Missing individualId (profile not hydrated).");
+      }
+
+      await upsertUserOrganizationByIndividualId({
+        individual_id: individualId,
+        ens_name: selectedOrg.ens_name,
+        agent_name: selectedOrg.agent_name,
+        org_name: selectedOrg.org_name ?? null,
+        org_address: selectedOrg.org_address ?? null,
+        org_type: selectedOrg.org_type ?? null,
+        agent_account:
+          (typeof fullAgent.agentAccount === "string" && fullAgent.agentAccount.trim()
+            ? fullAgent.agentAccount.trim()
+            : selectedOrg.agent_account) ?? null,
+        uaid: effectiveUaid,
+        chain_id: selectedOrg.chain_id ?? sepolia.id,
+        session_package: selectedOrg.session_package ?? null,
+        agent_card_json: agentCardJsonToPersist ?? selectedOrg.agent_card_json ?? null,
+        org_metadata: selectedOrg.org_metadata ?? null,
+        is_primary: true,
+        role: selectedOrg.role ?? null,
+      });
+    } catch (e) {
+      console.warn("[useStandardConnect] Failed to persist selected org agent into DB:", e);
+    }
     
     // Update user profile (skip setting default agent since we already set it above)
     if (pendingIndivAaAddress) {
@@ -685,7 +768,7 @@ export function useStandardConnect() {
     
     // Navigate to dashboard
     router.push("/dashboard");
-  }, [pendingIndivAaAddress, availableOrgs, router, setDefaultOrgAgent, setAgentFromOrg, web3auth, user]);
+  }, [pendingIndivAaAddress, pendingIndividualId, availableOrgs, router, setDefaultOrgAgent, setAgentFromOrg, web3auth, user]);
 
   return { 
     handleStandardConnect,
