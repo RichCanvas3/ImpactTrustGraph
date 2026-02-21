@@ -148,11 +148,15 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
   throw new Error(err.message || err.error || `Request failed (${res.status})`);
 }
 
-export async function listInitiatives(individualId: number, scope: InitiativeScope): Promise<InitiativeRow[]> {
+export async function listInitiatives(
+  individualId: number,
+  scope: InitiativeScope,
+  signal?: AbortSignal,
+): Promise<InitiativeRow[]> {
   const params = new URLSearchParams();
   params.set("individualId", String(individualId));
   params.set("scope", scope);
-  const res = await fetch(`/api/initiatives?${params.toString()}`, { method: "GET" });
+  const res = await fetch(`/api/initiatives?${params.toString()}`, { method: "GET", signal });
   const data = await jsonOrThrow<{ initiatives: InitiativeRow[] }>(res);
   return data.initiatives || [];
 }

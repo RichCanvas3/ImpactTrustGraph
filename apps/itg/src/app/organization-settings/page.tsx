@@ -29,6 +29,7 @@ import {
 import { generateSessionPackage } from "@agentic-trust/core";
 import { createPublicClient, http } from "viem";
 import type { Address } from "viem";
+import { parseUaidParts } from "../../lib/uaid";
 
 type OrgSettingsTab = "settings" | "operations";
 
@@ -190,8 +191,9 @@ export default function OrganizationSettingsPage() {
   const uaid = organization?.uaid ?? null;
   const ensName = organization?.ens_name ?? defaultOrgAgent?.ensName ?? null;
   const agentName = organization?.agent_name ?? defaultOrgAgent?.agentName ?? null;
-  const agentAccount = defaultOrgAgent?.agentAccount ?? organization?.agent_account ?? null;
-  const chainId = (defaultOrgAgent?.chainId ?? organization?.chain_id ?? 11155111) as number;
+  const parsedUaid = parseUaidParts(uaid);
+  const agentAccount = defaultOrgAgent?.agentAccount ?? parsedUaid?.agentAccount ?? null;
+  const chainId = (defaultOrgAgent?.chainId ?? parsedUaid?.chainId ?? 11155111) as number;
   const agentId = React.useMemo(() => {
     const fromCard = safeParseJson(organization?.agent_card_json ?? null);
     const fromCardId =
@@ -206,7 +208,7 @@ export default function OrganizationSettingsPage() {
   const hydrateSelectedOrg = React.useCallback(async () => {
     if (!individualId) throw new Error("Missing individualId (profile not hydrated).");
     if (!organization?.ens_name) throw new Error("Missing organization ENS name.");
-    const resolvedChainId = Number(organization.chain_id ?? chainId ?? 11155111);
+    const resolvedChainId = Number(parseUaidParts(organization.uaid)?.chainId ?? chainId ?? 11155111);
     if (!Number.isFinite(resolvedChainId)) throw new Error("Invalid chainId for organization.");
 
     // ENS → smart-account (AA) address
@@ -247,9 +249,7 @@ export default function OrganizationSettingsPage() {
       org_name: organization.org_name ?? null,
       org_address: organization.org_address ?? null,
       org_type: organization.org_type ?? null,
-      agent_account: resolvedAccount.toLowerCase(),
       uaid: effectiveUaid,
-      chain_id: resolvedChainId,
       session_package: organization.session_package ?? null,
       agent_card_json: agentCardJson,
       org_metadata: organization.org_metadata ?? null,
@@ -281,13 +281,12 @@ export default function OrganizationSettingsPage() {
     if (!organization) return;
     if (!organization.ens_name) return;
     const needsHydration =
-      !organization.agent_account ||
       !organization.agent_card_json ||
       organization.agent_row_id == null;
     if (!needsHydration) return;
 
     if (!individualId) return;
-    const resolvedChainId = Number(organization.chain_id ?? chainId ?? 11155111);
+    const resolvedChainId = Number(parseUaidParts(organization.uaid)?.chainId ?? chainId ?? 11155111);
     if (!Number.isFinite(resolvedChainId)) return;
     const key = `${individualId}:${resolvedChainId}:${String(organization.ens_name).toLowerCase()}`;
     if (agentHydrateKeyRef.current === key) return;
@@ -337,9 +336,7 @@ export default function OrganizationSettingsPage() {
         org_name: updated.org_name ?? null,
         org_address: updated.org_address ?? null,
         org_type: updated.org_type ?? null,
-        agent_account: updated.agent_account ?? null,
         uaid: effectiveUaid,
-        chain_id: updated.chain_id ?? null,
         session_package: updated.session_package ?? null,
         agent_card_json: updated.agent_card_json ?? null,
         org_metadata: updated.org_metadata ?? null,
@@ -474,9 +471,7 @@ export default function OrganizationSettingsPage() {
           org_name: organization.org_name ?? null,
           org_address: organization.org_address ?? null,
           org_type: organization.org_type ?? null,
-          agent_account: ((aa as string) ?? organization.agent_account) ?? null,
           uaid: effectiveUaid,
-          chain_id: chainId,
           session_package: JSON.stringify(pkg),
           agent_card_json: organization.agent_card_json ?? null,
           org_metadata: organization.org_metadata ?? null,
@@ -540,9 +535,7 @@ export default function OrganizationSettingsPage() {
         org_name: organization.org_name ?? null,
         org_address: organization.org_address ?? null,
         org_type: organization.org_type ?? null,
-        agent_account: (agentAccount ?? organization.agent_account) ?? null,
         uaid: effectiveUaid,
-        chain_id: chainId,
         session_package: JSON.stringify(sessionPkg),
         agent_card_json: organization.agent_card_json ?? null,
         org_metadata: organization.org_metadata ?? null,

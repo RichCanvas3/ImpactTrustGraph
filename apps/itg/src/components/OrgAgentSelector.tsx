@@ -3,6 +3,7 @@
 import * as React from "react";
 import { type DefaultOrgAgent } from "./useDefaultOrgAgent";
 import { type OrganizationAssociation } from "../app/service/userProfileService";
+import { parseUaidParts } from "../lib/uaid";
 
 interface OrgAgentSelectorProps {
   organizations: OrganizationAssociation[];
@@ -21,12 +22,14 @@ export function OrgAgentSelector({ organizations, onSelect, onCancel }: OrgAgent
     const selectedOrg = organizations[selectedIndex];
     if (!selectedOrg) return;
 
+    const parsed = parseUaidParts(selectedOrg.uaid);
+
     // Convert OrganizationAssociation to DefaultOrgAgent
     const defaultAgent: DefaultOrgAgent = {
       ensName: selectedOrg.ens_name,
       agentName: selectedOrg.agent_name,
-      agentAccount: selectedOrg.agent_account || "",
-      chainId: selectedOrg.chain_id || 11155111,
+      agentAccount: parsed?.agentAccount ?? "",
+      chainId: parsed?.chainId ?? 11155111,
       name: selectedOrg.org_name,
       description: undefined,
       image: undefined,

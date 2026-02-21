@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import * as React from "react";
 import { sepolia } from "viem/chains";
+import { parseUaidParts } from "../lib/uaid";
 import { useWeb3Auth } from "./Web3AuthProvider";
 import { useConnection } from "./connection-context";
 import { IndivService } from "../app/service/indivService";
@@ -119,11 +120,12 @@ export function useStandardConnect() {
       console.warn("Failed to set agent from organization:", error);
       // Only set basic info if not skipping and full fetch failed
       if (!skipSetDefaultAgent) {
+        const parsed = parseUaidParts((org as any)?.uaid);
         setDefaultOrgAgent({
           ensName: org.ens_name,
           agentName: org.agent_name,
-          agentAccount: org.agent_account || "",
-          chainId: org.chain_id || sepolia.id,
+          agentAccount: parsed?.agentAccount ?? "",
+          chainId: parsed?.chainId ?? sepolia.id,
           ...(typeof org?.uaid === "string" && org.uaid.trim() ? { uaid: org.uaid.trim() } : {}),
         });
       }
@@ -448,7 +450,7 @@ export function useStandardConnect() {
                   agentName,
                   agentAccount: "",
                   chainId: sepolia.id,
-                }, cleanedEmail ?? undefined);
+                });
               }
 
               // Organization exists - show selector instead of auto-redirecting
@@ -460,28 +462,50 @@ export function useStandardConnect() {
                 ens_name: ensName,
                 agent_name: agentName,
                 email_domain: emailDomain,
-                agent_account: null as string | null,
-                chain_id: sepolia.id,
+                uaid: null as string | null,
                 org_name: null as string | null,
                 org_address: null as string | null,
                 org_type: null as string | null,
                 is_primary: true,
                 role: null as string | null,
+                agent_card_json: null as string | null,
               };
               
-              // Try to get agent account from ENS info
+              // UAID is canonical. Best-effort: resolve UAID via ENS -> account -> by-account.
               try {
                 const didEns = `did:ens:${sepolia.id}:${ensName}`;
                 const encodedDidEns = encodeURIComponent(didEns);
                 const ensResponse = await fetch(`/api/names/${encodedDidEns}`);
                 if (ensResponse.ok) {
                   const ensResult = await ensResponse.json();
-                  if (ensResult?.nameInfo?.account) {
-                    orgAssociation.agent_account = ensResult.nameInfo.account;
+                  const acct = typeof ensResult?.nameInfo?.account === "string" ? String(ensResult.nameInfo.account).trim() : "";
+                  if (acct) {
+                    const didEthr = `did:ethr:${sepolia.id}:${acct}`;
+                    const agentResp = await fetch(`/api/agents/by-account/${encodeURIComponent(didEthr)}`);
+                    const agentData = agentResp.ok ? await agentResp.json().catch(() => null) : null;
+                    const discoveredUaid =
+                      agentData && agentData.found === true && typeof agentData.uaid === "string" && agentData.uaid.trim()
+                        ? String(agentData.uaid).trim()
+                        : typeof agentData?.agent?.uaid === "string" && agentData.agent.uaid.trim()
+                          ? String(agentData.agent.uaid).trim()
+                          : null;
+                    if (discoveredUaid) {
+                      (orgAssociation as any).uaid = discoveredUaid;
+                    }
+                    // Preserve any agent card payload if available
+                    const card =
+                      agentData && typeof (agentData as any)?.agent_card_json === "string" && String((agentData as any).agent_card_json).trim()
+                        ? String((agentData as any).agent_card_json)
+                        : agentData && typeof (agentData as any)?.agentCardJson === "string" && String((agentData as any).agentCardJson).trim()
+                          ? String((agentData as any).agentCardJson)
+                          : null;
+                    if (card) {
+                      (orgAssociation as any).agent_card_json = card;
+                    }
                   }
                 }
               } catch (err) {
-                console.warn("Failed to get agent account from ENS:", err);
+                console.warn("Failed to get UAID from ENS/by-account:", err);
               }
               
               // Show selector with this org
@@ -577,11 +601,13 @@ export function useStandardConnect() {
     
     try {
       // First, try to get agent account from ENS if not available in selectedOrg
-      let agentAccount = selectedOrg.agent_account;
+      const parsedOrg = parseUaidParts((selectedOrg as any)?.uaid);
+      const chainId = parsedOrg?.chainId ?? sepolia.id;
+      let agentAccount: string | null = parsedOrg?.agentAccount ?? null;
       
       if (!agentAccount && selectedOrg.ens_name) {
         // Fetch agent account from ENS name
-        const didEns = `did:ens:${sepolia.id}:${selectedOrg.ens_name}`;
+        const didEns = `did:ens:${chainId}:${selectedOrg.ens_name}`;
         const encodedDidEns = encodeURIComponent(didEns);
         const ensResponse = await fetch(`/api/names/${encodedDidEns}`);
         
@@ -596,7 +622,7 @@ export function useStandardConnect() {
       
       // Now fetch full agent details using the agent account
       if (agentAccount && typeof agentAccount === "string" && agentAccount.startsWith("0x")) {
-        const didEthr = `did:ethr:${sepolia.id}:${agentAccount}`;
+        const didEthr = `did:ethr:${chainId}:${agentAccount}`;
         const encodedDid = encodeURIComponent(didEthr);
         const agentResponse = await fetch(`/api/agents/by-account/${encodedDid}`);
         
@@ -713,12 +739,7 @@ export function useStandardConnect() {
         org_name: selectedOrg.org_name ?? null,
         org_address: selectedOrg.org_address ?? null,
         org_type: selectedOrg.org_type ?? null,
-        agent_account:
-          (typeof fullAgent.agentAccount === "string" && fullAgent.agentAccount.trim()
-            ? fullAgent.agentAccount.trim()
-            : selectedOrg.agent_account) ?? null,
         uaid: effectiveUaid,
-        chain_id: selectedOrg.chain_id ?? sepolia.id,
         session_package: selectedOrg.session_package ?? null,
         agent_card_json: agentCardJsonToPersist ?? selectedOrg.agent_card_json ?? null,
         org_metadata: selectedOrg.org_metadata ?? null,

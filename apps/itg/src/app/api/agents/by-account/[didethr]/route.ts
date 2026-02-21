@@ -143,7 +143,9 @@ export async function GET(
 
       return NextResponse.json({
         found: true,
-        ...agentInfo
+        ...agentInfo,
+        // Ensure UAID is always present at top-level (canonical identifier)
+        uaid,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

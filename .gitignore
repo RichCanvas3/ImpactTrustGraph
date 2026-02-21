@@ -10,6 +10,7 @@ build
 .env.*
 !.env.example
 !.env.sample
+.wrangler
 *.toml
 *.secret
 

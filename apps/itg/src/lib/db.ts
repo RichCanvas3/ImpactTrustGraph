@@ -57,8 +57,6 @@ export interface Organization {
   org_address: string | null;
   org_type: string | null;
   email_domain: string;
-  agent_account: string | null;
-  chain_id: number;
   session_package: string | null; // JSON string of sessionPackage
   created_at: number;
   updated_at: number;

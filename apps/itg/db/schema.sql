@@ -32,10 +32,8 @@ CREATE TABLE IF NOT EXISTS organizations (
   org_address TEXT, -- Physical address of the organization
   org_type TEXT, -- Type: 'organization', 'coalition', 'contributor'
   email_domain TEXT NOT NULL, -- e.g., 'richcanvas.io'
-  agent_account TEXT, -- Agent's account address (0x...)
-  uaid TEXT, -- UAID for the organization's smart account (optional)
+  uaid TEXT, -- UAID for the organization's smart account (canonical agent identifier)
   agent_row_id INTEGER, -- FK to agents.id (best-effort)
-  chain_id INTEGER NOT NULL DEFAULT 11155111, -- Sepolia by default
   session_package TEXT, -- JSON string of sessionPackage for agent configuration
   org_metadata TEXT, -- JSON: role-specific org fields (sector, programs, funder compliance, etc.)
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -45,12 +43,10 @@ CREATE TABLE IF NOT EXISTS organizations (
 -- Agents table: canonical agent records (modeled after admin app)
 CREATE TABLE IF NOT EXISTS agents (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  uaid TEXT UNIQUE, -- UAID for smart-agent operations (optional but preferred)
+  uaid TEXT UNIQUE, -- UAID for smart-agent operations (canonical)
   ens_name TEXT, -- e.g. 'name.8004-agent.eth' or did:ens:...
   agent_name TEXT,
   email_domain TEXT, -- org or ENS base domain (e.g. 8004-agent.eth or example.com)
-  agent_account TEXT,
-  chain_id INTEGER NOT NULL DEFAULT 11155111,
   session_package TEXT,
   agent_card_json TEXT,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),

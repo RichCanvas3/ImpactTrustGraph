@@ -204,9 +204,7 @@ export default function ApplicationEnvironmentPage() {
             ens_name: ens,
             agent_name: agentName,
             org_name: typeof defaultOrgAgent?.name === "string" ? defaultOrgAgent.name : null,
-            agent_account: resolvedAccount || null,
             uaid: uaidValue,
-            chain_id: resolvedChainId,
             is_primary: true,
             role: profileRole,
           });

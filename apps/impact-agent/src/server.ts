@@ -1,11 +1,5 @@
-// Load environment variables from .env file
-import 'dotenv/config';
-
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { serve } from '@hono/node-server';
-import { fileURLToPath } from 'node:url';
-import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
 
 import {
   getCorsHeaders,
@@ -145,26 +139,87 @@ const A2A_KEY_ID = 'g1';
  * Load Ed25519 private key for HTTP Message Signatures from environment.
  * Expected format: PKCS#8 PEM in A2A_ED25519_PRIVATE_KEY_PEM.
  */
-function getA2aPrivateKey() {
-  const pem = process.env.A2A_ED25519_PRIVATE_KEY_PEM;
+function pemToDerBytes(pem: string): Uint8Array | null {
+  try {
+    const normalized = String(pem || '')
+      .replace(/\r/g, '')
+      .replace(/-----BEGIN [^-]+-----/g, '')
+      .replace(/-----END [^-]+-----/g, '')
+      .replace(/\s+/g, '')
+      .trim();
+    if (!normalized) return null;
+
+    // atob is available in Workers; Buffer is available in Node.
+    const bin =
+      typeof atob === 'function'
+        ? atob(normalized)
+        : typeof Buffer !== 'undefined'
+          ? Buffer.from(normalized, 'base64').toString('binary')
+          : '';
+    if (!bin) return null;
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  // Signature is small (~64 bytes). Safe to use string conversion.
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(bytes).toString('base64');
+  }
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]!);
+  const btoaFn = (globalThis as any).btoa as ((s: string) => string) | undefined;
+  if (typeof btoaFn !== 'function') {
+    throw new Error('No base64 encoder available (missing Buffer/btoa)');
+  }
+  return btoaFn(bin);
+}
+
+let a2aPrivateKeyPromise: Promise<any> | null = null;
+
+async function getA2aPrivateKey(): Promise<any | null> {
+  if (a2aPrivateKeyPromise) return a2aPrivateKeyPromise;
+
+  const pem = typeof process !== 'undefined' ? process.env.A2A_ED25519_PRIVATE_KEY_PEM : undefined;
   if (!pem) {
     console.warn('[IMPACT-AGENT] A2A_ED25519_PRIVATE_KEY_PEM is not set; HTTP signatures will be omitted.');
-    return null;
+    a2aPrivateKeyPromise = Promise.resolve(null);
+    return a2aPrivateKeyPromise;
   }
-  try {
-    return createPrivateKey({ key: pem });
-  } catch (e) {
-    console.error('[IMPACT-AGENT] Failed to load Ed25519 private key from A2A_ED25519_PRIVATE_KEY_PEM:', e);
-    return null;
-  }
+
+  a2aPrivateKeyPromise = (async () => {
+    try {
+      const der = pemToDerBytes(pem);
+      if (!der) throw new Error('Invalid PEM');
+      if (!globalThis.crypto?.subtle) {
+        throw new Error('WebCrypto subtle is not available');
+      }
+      return await globalThis.crypto.subtle.importKey(
+        'pkcs8',
+        der,
+        { name: 'Ed25519' } as any,
+        false,
+        ['sign'],
+      );
+    } catch (e) {
+      console.error('[IMPACT-AGENT] Failed to import Ed25519 key from A2A_ED25519_PRIVATE_KEY_PEM:', e);
+      return null;
+    }
+  })();
+
+  return a2aPrivateKeyPromise;
 }
 
 /**
  * Add HTTP Message Signature headers (RFC 9421 style) to the response.
  * Covers: "AID-Challenge", @method, @target-uri, host, date
  */
-function addHttpSignatureHeaders(c: any, targetUri: string) {
-  const key = getA2aPrivateKey();
+async function addHttpSignatureHeaders(c: any, targetUri: string) {
+  const key = await getA2aPrivateKey();
   if (!key) return;
 
   try {
@@ -192,8 +247,11 @@ function addHttpSignatureHeaders(c: any, targetUri: string) {
       `"date": ${dateHeader}\n` +
       `"@signature-params": ${signatureParams}`;
 
-    const sigBytes = cryptoSign(null, Buffer.from(signatureBase, 'utf-8'), key);
-    const sigB64 = sigBytes.toString('base64');
+    const enc = (globalThis as any).TextEncoder ? new (globalThis as any).TextEncoder() : null;
+    if (!enc) throw new Error('TextEncoder is not available');
+    const data = enc.encode(signatureBase) as Uint8Array;
+    const sigBuf = await globalThis.crypto.subtle.sign({ name: 'Ed25519' } as any, key, data);
+    const sigB64 = bytesToBase64(new Uint8Array(sigBuf));
 
     // RFC 9421 headers
     c.header('Signature-Input', `sig=${signatureParams}`);
@@ -682,7 +740,7 @@ async function handleA2aGet(c: any) {
   Object.entries(headers).forEach(([key, value]) => c.header(key, value));
 
   // Attach HTTP Message Signature headers if key is configured
-  addHttpSignatureHeaders(c, targetUri);
+  await addHttpSignatureHeaders(c, targetUri);
 
   return c.json(body);
 }
@@ -2171,26 +2229,5 @@ async function handleA2aRequest(c: any) {
  */
 app.get('/api/a2a', handleA2aGet);
 app.post('/api/a2a', handleA2aRequest);
-
-// Start server only if running directly (not imported as a module/worker)
-
-let isMainModule = false;
-try {
-  // Only attempt to check main module if we are in a Node.js environment with file:// URL
-  if (typeof process !== 'undefined' && process.argv && import.meta.url && import.meta.url.startsWith('file:')) {
-    isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
-  }
-} catch (e) {
-  // Ignore errors (e.g. in Cloudflare Workers environment)
-}
-
-if (isMainModule) {
-  const port = parseInt(process.env.PORT || '3000', 10);
-  console.log(`[IMPACT-AGENT] Hono provider listening on port ${port}`);
-  serve({
-    fetch: app.fetch,
-    port
-  });
-}
 
 export default app;

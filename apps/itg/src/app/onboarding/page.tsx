@@ -417,7 +417,8 @@ export default function OnboardingPage() {
 
         // If participant agent already exists, hydrate it early so Step 3 can continue immediately.
         if (typeof profile.participant_uaid === "string" && profile.participant_uaid) {
-          setParticipantUaid((prev) => prev ?? profile.participant_uaid);
+          const uaid = profile.participant_uaid;
+          setParticipantUaid((prev) => prev ?? (typeof uaid === "string" && uaid ? uaid : null));
           if (typeof profile.participant_agent_name === "string") {
             const participantName = profile.participant_agent_name;
             setParticipantAgentName((prev) => (prev.trim() ? prev : participantName || ""));
@@ -867,9 +868,7 @@ export default function OnboardingPage() {
             org_address: undefined,
             org_type: undefined,
             email_domain: emailDomain ?? "unknown",
-            agent_account: agentAccount || undefined,
             uaid: effectiveUaid,
-            chain_id: chainId,
             is_primary: false,
             role: undefined,
           });
@@ -883,9 +882,7 @@ export default function OnboardingPage() {
               org_address: undefined,
               org_type: undefined,
               email_domain: emailDomain ?? "unknown",
-              agent_account: agentAccount || undefined,
               uaid: effectiveUaid,
-              chain_id: chainId,
               is_primary: false,
               role: undefined,
             },
@@ -896,7 +893,7 @@ export default function OnboardingPage() {
         console.warn("[onboarding] Failed to persist org association:", e);
       }
 
-      setDefaultOrgAgent(defaultAgent, userEmail ?? undefined);
+      setDefaultOrgAgent(defaultAgent);
       setItg(ensName);
       setStep(6);
     },
@@ -1492,7 +1489,6 @@ export default function OnboardingPage() {
             org_address: org.address || undefined,
             org_type: org.type || undefined,
             email_domain: emailDomain ?? "unknown",
-            agent_account: actualAgentAccount,
             uaid: hydratedOrgUaid,
             org_metadata: (() => {
               const m: Record<string, any> = {};
@@ -1515,7 +1511,6 @@ export default function OnboardingPage() {
               }
               return Object.keys(m).length ? JSON.stringify(m) : null;
             })(),
-            chain_id: sepolia.id,
             is_primary: true, // This is the primary org based on email domain
           };
 
@@ -1552,8 +1547,7 @@ export default function OnboardingPage() {
             did: defaultAgent.did,
           });
           
-          // Pass email directly to ensure localStorage is saved
-          setDefaultOrgAgent(defaultAgent, userEmail ?? undefined);
+          setDefaultOrgAgent(defaultAgent);
           
           // Wait a moment to ensure state is saved before any navigation
           await new Promise((resolve) => setTimeout(resolve, 200));
@@ -1614,11 +1608,7 @@ export default function OnboardingPage() {
           organizations={userOrganizations}
           onSelect={(agent) => {
             setShowOrgConnectSelector(false);
-            if (user?.email) {
-              setDefaultOrgAgent(agent, user.email);
-            } else {
-              setDefaultOrgAgent(agent);
-            }
+            setDefaultOrgAgent(agent);
             setItg(agent.ensName);
             setStep(6);
           }}

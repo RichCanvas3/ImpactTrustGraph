@@ -27,8 +27,6 @@ async function ensureAgentsSchema(db: D1Database) {
         ens_name TEXT,
         agent_name TEXT,
         email_domain TEXT,
-        agent_account TEXT,
-        chain_id INTEGER NOT NULL DEFAULT 11155111,
         session_package TEXT,
         agent_card_json TEXT,
         created_at INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -44,8 +42,6 @@ async function ensureAgentsSchema(db: D1Database) {
       { name: "ens_name", sql: "ALTER TABLE agents ADD COLUMN ens_name TEXT" },
       { name: "agent_name", sql: "ALTER TABLE agents ADD COLUMN agent_name TEXT" },
       { name: "email_domain", sql: "ALTER TABLE agents ADD COLUMN email_domain TEXT" },
-      { name: "agent_account", sql: "ALTER TABLE agents ADD COLUMN agent_account TEXT" },
-      { name: "chain_id", sql: "ALTER TABLE agents ADD COLUMN chain_id INTEGER NOT NULL DEFAULT 11155111" },
       { name: "session_package", sql: "ALTER TABLE agents ADD COLUMN session_package TEXT" },
       { name: "agent_card_json", sql: "ALTER TABLE agents ADD COLUMN agent_card_json TEXT" },
       { name: "created_at", sql: "ALTER TABLE agents ADD COLUMN created_at INTEGER NOT NULL DEFAULT (unixepoch())" },
@@ -354,18 +350,6 @@ export async function POST(request: NextRequest) {
       const agentName = typeof participant_agent_name === "string" ? participant_agent_name : null;
       const uaid = typeof participant_uaid === "string" ? participant_uaid : null;
 
-      const parsed = (() => {
-        if (!uaid) return { chainId: null as number | null, agentAccount: null as string | null };
-        const m = uaid.match(/did:ethr:(\d+):(0x[a-fA-F0-9]{40})/);
-        if (!m) return { chainId: null as number | null, agentAccount: null as string | null };
-        const chainId = Number.parseInt(m[1], 10);
-        const agentAccount = String(m[2]).toLowerCase();
-        return {
-          chainId: Number.isFinite(chainId) ? chainId : null,
-          agentAccount: /^0x[a-f0-9]{40}$/.test(agentAccount) ? agentAccount : null,
-        };
-      })();
-
       const emailDomain =
         (typeof cleanedEmail === "string" && cleanedEmail.includes("@") ? cleanedEmail.split("@")[1]?.toLowerCase() : null) ??
         deriveEmailDomainFromEns(ensName) ??
@@ -382,8 +366,6 @@ export async function POST(request: NextRequest) {
                  ens_name = COALESCE(?, ens_name),
                  agent_name = COALESCE(?, agent_name),
                  email_domain = COALESCE(?, email_domain),
-                 agent_account = COALESCE(?, agent_account),
-                 chain_id = COALESCE(?, chain_id),
                  agent_card_json = COALESCE(?, agent_card_json),
                  updated_at = ?
              WHERE id = ?`,
@@ -392,8 +374,6 @@ export async function POST(request: NextRequest) {
             ensName,
             agentName,
             emailDomain,
-            parsed.agentAccount,
-            parsed.chainId,
             null,
             now,
             existingAgent.id,
@@ -402,15 +382,13 @@ export async function POST(request: NextRequest) {
         } else {
           const ins = await db.prepare(
             `INSERT INTO agents
-             (uaid, ens_name, agent_name, email_domain, agent_account, chain_id, session_package, agent_card_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, COALESCE(?, 11155111), NULL, NULL, ?, ?)`,
+             (uaid, ens_name, agent_name, email_domain, session_package, agent_card_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)`,
           ).bind(
             uaid,
             ensName,
             agentName,
             emailDomain,
-            parsed.agentAccount,
-            parsed.chainId,
             now,
             now,
           ).run();

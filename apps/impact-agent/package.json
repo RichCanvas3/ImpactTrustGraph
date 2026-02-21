@@ -4,11 +4,11 @@
   "private": true,
   "description": "Impact Agent - A2A provider app for ITG agents (Hono)",
   "scripts": {
-    "dev": "wrangler dev src/server.ts",
-    "dev:node": "tsx src/server.ts",
+    "dev": "wrangler dev src/worker.ts",
+    "dev:node": "tsx src/node.ts",
     "deploy": "wrangler deploy",
     "build": "echo \"@my-scope/impact-agent: no-op build (Hono server)\"",
-    "start": "NODE_ENV=production tsx src/server.ts",
+    "start": "NODE_ENV=production tsx src/node.ts",
     "lint": "eslint . --ext ts,tsx,js,jsx"
   },
   "dependencies": {

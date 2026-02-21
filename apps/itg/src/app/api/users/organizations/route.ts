@@ -40,6 +40,13 @@ async function ensureOrganizationsSchema(db: D1Database) {
         // ignore
       }
     }
+    if (!existing.has("agent_card_json")) {
+      try {
+        await db.prepare("ALTER TABLE organizations ADD COLUMN agent_card_json TEXT").run();
+      } catch {
+        // ignore
+      }
+    }
     if (!existing.has("org_metadata")) {
       try {
         await db.prepare("ALTER TABLE organizations ADD COLUMN org_metadata TEXT").run();
@@ -62,8 +69,6 @@ async function ensureAgentsSchema(db: D1Database) {
         ens_name TEXT,
         agent_name TEXT,
         email_domain TEXT,
-        agent_account TEXT,
-        chain_id INTEGER NOT NULL DEFAULT 11155111,
         session_package TEXT,
         agent_card_json TEXT,
         created_at INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -160,9 +165,7 @@ export async function GET(request: NextRequest) {
       org_address: string | null;
       org_type: string | null;
       email_domain: string;
-      agent_account: string | null;
       agent_card_json?: string | null;
-      chain_id: number;
       is_primary: number; // SQLite stores boolean as 0/1
       role: string | null;
     }>();
@@ -175,13 +178,11 @@ export async function GET(request: NextRequest) {
       org_address: row.org_address,
       org_type: row.org_type,
       email_domain: row.email_domain,
-      agent_account: row.agent_account,
       uaid: (row as any).uaid ?? null,
       agent_row_id: (row as any).agent_row_id ?? null,
       session_package: (row as any).session_package ?? null,
       agent_card_json: (row as any).agent_card_json ?? null,
       org_metadata: (row as any).org_metadata ?? null,
-      chain_id: row.chain_id,
       is_primary: row.is_primary === 1,
       role: row.role,
     }));
@@ -214,12 +215,10 @@ export async function POST(request: NextRequest) {
       org_address,
       org_type,
       email_domain,
-      agent_account,
       uaid,
       session_package,
       agent_card_json,
       org_metadata,
-      chain_id,
       is_primary,
       role,
     } = body;
@@ -239,11 +238,27 @@ export async function POST(request: NextRequest) {
       typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
     const cleanedEoa =
       typeof eoa_address === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa_address) ? eoa_address : null;
-    const uaidValue = typeof uaid === "string" && uaid.trim() ? uaid.trim() : null;
+    let uaidValue = typeof uaid === "string" && uaid.trim() ? uaid.trim() : null;
 
-    if ((!individualIdFromBody) || !uaidValue) {
+    // Best-effort UAID hydration (canonical). Accept UAID from agent_card_json if present.
+    if (!uaidValue && typeof agent_card_json === "string" && agent_card_json.trim()) {
+      try {
+        const parsed = JSON.parse(agent_card_json);
+        const candidate =
+          typeof parsed?.uaid === "string"
+            ? parsed.uaid
+            : typeof parsed?.agent?.uaid === "string"
+              ? parsed.agent.uaid
+              : null;
+        if (candidate && String(candidate).trim()) uaidValue = String(candidate).trim();
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!individualIdFromBody || !ens_name || !agent_name || !uaidValue) {
       return NextResponse.json(
-        { error: 'Missing required fields: (individualId), uaid' },
+        { error: 'Missing required fields: (individualId), ens_name, agent_name, uaid' },
         { status: 400 }
       );
     }
@@ -308,9 +323,8 @@ export async function POST(request: NextRequest) {
     if (!organization) {
       // Create organization if it doesn't exist
       const now = Math.floor(Date.now() / 1000);
-      const resolvedChainId = chain_id || 11155111;
 
-      // Upsert canonical agents row (best-effort) and capture id for FK.
+      // Upsert canonical agents row (UAID-only) and capture id for FK.
       let agentRowId: number | null = null;
       try {
         const existingAgent = await db
@@ -324,8 +338,6 @@ export async function POST(request: NextRequest) {
                  ens_name = COALESCE(?, ens_name),
                  agent_name = COALESCE(?, agent_name),
                  email_domain = COALESCE(?, email_domain),
-                 agent_account = COALESCE(?, agent_account),
-                 chain_id = COALESCE(?, chain_id),
                  session_package = COALESCE(?, session_package),
                  agent_card_json = COALESCE(?, agent_card_json),
                  updated_at = ?
@@ -335,8 +347,6 @@ export async function POST(request: NextRequest) {
             ens_name,
             agent_name,
             resolvedEmailDomain,
-            agent_account || null,
-            resolvedChainId,
             typeof session_package === "string" ? session_package : null,
             typeof agent_card_json === "string" ? agent_card_json : null,
             now,
@@ -346,15 +356,13 @@ export async function POST(request: NextRequest) {
         } else {
           const ins = await db.prepare(
             `INSERT INTO agents
-             (uaid, ens_name, agent_name, email_domain, agent_account, chain_id, session_package, agent_card_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (uaid, ens_name, agent_name, email_domain, session_package, agent_card_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           ).bind(
             uaidValue,
             ens_name,
             agent_name,
             resolvedEmailDomain,
-            agent_account || null,
-            resolvedChainId,
             typeof session_package === "string" ? session_package : null,
             typeof agent_card_json === "string" ? agent_card_json : null,
             now,
@@ -365,12 +373,12 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         console.warn("[users/organizations] Failed to upsert agents row:", e);
       }
-      
+
       const insertResult = await db.prepare(
         `INSERT INTO organizations 
          (ens_name, agent_name, org_name, org_address, org_type, email_domain, 
-          agent_account, uaid, agent_row_id, chain_id, session_package, org_metadata, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          uaid, agent_row_id, session_package, agent_card_json, org_metadata, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         ens_name,
         agent_name,
@@ -378,14 +386,13 @@ export async function POST(request: NextRequest) {
         org_address || null,
         org_type || null,
         resolvedEmailDomain,
-        agent_account || null,
         uaidValue,
         agentRowId,
-        resolvedChainId,
         typeof session_package === "string" ? session_package : null,
+        typeof agent_card_json === "string" ? agent_card_json : null,
         typeof org_metadata === "string" ? org_metadata : null,
         now,
-        now
+        now,
       ).run();
 
       organization = { id: Number(insertResult.meta.last_row_id) };
@@ -393,10 +400,9 @@ export async function POST(request: NextRequest) {
       // Update organization if it exists
       const now = Math.floor(Date.now() / 1000);
 
-      // Upsert canonical agents row (best-effort) and capture id for FK.
+      // Upsert canonical agents row (UAID-only) and capture id for FK.
       let agentRowId: number | null = null;
       try {
-        const resolvedChainId = chain_id || 11155111;
         const existingAgent = await db
           .prepare("SELECT id FROM agents WHERE uaid = ?")
           .bind(uaidValue)
@@ -408,8 +414,6 @@ export async function POST(request: NextRequest) {
                  ens_name = COALESCE(?, ens_name),
                  agent_name = COALESCE(?, agent_name),
                  email_domain = COALESCE(?, email_domain),
-                 agent_account = COALESCE(?, agent_account),
-                 chain_id = COALESCE(?, chain_id),
                  session_package = COALESCE(?, session_package),
                  agent_card_json = COALESCE(?, agent_card_json),
                  updated_at = ?
@@ -419,8 +423,6 @@ export async function POST(request: NextRequest) {
             ens_name,
             agent_name,
             resolvedEmailDomain,
-            agent_account || null,
-            resolvedChainId,
             typeof session_package === "string" ? session_package : null,
             typeof agent_card_json === "string" ? agent_card_json : null,
             now,
@@ -430,15 +432,13 @@ export async function POST(request: NextRequest) {
         } else {
           const ins = await db.prepare(
             `INSERT INTO agents
-             (uaid, ens_name, agent_name, email_domain, agent_account, chain_id, session_package, agent_card_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (uaid, ens_name, agent_name, email_domain, session_package, agent_card_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           ).bind(
             uaidValue,
             ens_name,
             agent_name,
             resolvedEmailDomain,
-            agent_account || null,
-            resolvedChainId,
             typeof session_package === "string" ? session_package : null,
             typeof agent_card_json === "string" ? agent_card_json : null,
             now,
@@ -453,23 +453,68 @@ export async function POST(request: NextRequest) {
       await db.prepare(
         `UPDATE organizations 
          SET agent_name = ?, org_name = ?, org_address = ?, org_type = ?, 
-             agent_account = ?, uaid = ?, agent_row_id = COALESCE(?, agent_row_id),
+             uaid = ?, agent_row_id = COALESCE(?, agent_row_id),
              session_package = COALESCE(?, session_package),
+             agent_card_json = COALESCE(?, agent_card_json),
              org_metadata = COALESCE(?, org_metadata), updated_at = ?
-         WHERE ens_name = ?`
+         WHERE ens_name = ?`,
       ).bind(
         agent_name,
         org_name || null,
         org_address || null,
         org_type || null,
-        agent_account || null,
         uaidValue,
         agentRowId,
         typeof session_package === "string" ? session_package : null,
+        typeof agent_card_json === "string" ? agent_card_json : null,
         typeof org_metadata === "string" ? org_metadata : null,
         now,
-        ens_name
+        ens_name,
       ).run();
+    }
+
+    // Self-heal: if the individual already has a participant UAID, ensure it's present in agents.
+    try {
+      const p = await db
+        .prepare("SELECT participant_uaid, participant_ens_name, participant_agent_name FROM individuals WHERE id = ?")
+        .bind(individual.id)
+        .first<{ participant_uaid: string | null; participant_ens_name: string | null; participant_agent_name: string | null }>();
+      const pUaid = typeof p?.participant_uaid === "string" && p.participant_uaid.trim() ? p.participant_uaid.trim() : null;
+      if (pUaid) {
+        const existing = await db.prepare("SELECT id FROM agents WHERE uaid = ?").bind(pUaid).first<{ id: number }>();
+        const nowTs = Math.floor(Date.now() / 1000);
+        if (existing?.id) {
+          await db.prepare(
+            `UPDATE agents
+             SET uaid = ?,
+                 ens_name = COALESCE(?, ens_name),
+                 agent_name = COALESCE(?, agent_name),
+                 updated_at = ?
+             WHERE id = ?`,
+          ).bind(
+            pUaid,
+            p?.participant_ens_name ?? null,
+            p?.participant_agent_name ?? null,
+            nowTs,
+            existing.id,
+          ).run();
+        } else {
+          await db.prepare(
+            `INSERT INTO agents
+             (uaid, ens_name, agent_name, email_domain, session_package, agent_card_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)`,
+          ).bind(
+            pUaid,
+            p?.participant_ens_name ?? null,
+            p?.participant_agent_name ?? null,
+            "unknown",
+            nowTs,
+            nowTs,
+          ).run();
+        }
+      }
+    } catch (e) {
+      console.warn("[users/organizations] Failed to self-heal participant agent into agents table:", e);
     }
 
     // Check if association already exists
