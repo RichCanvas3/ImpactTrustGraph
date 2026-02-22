@@ -90,6 +90,14 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
     ],
   },
   {
+    id: "user",
+    label: "User Tools",
+    items: [
+      { id: "user-settings", label: "⚙️ User Settings", href: "/user-settings" },
+      { id: "user-tools", label: "🧰 User Tools", href: "/user-tools" },
+    ],
+  },
+  {
     id: "grant",
     label: "Grant Admin",
     items: [

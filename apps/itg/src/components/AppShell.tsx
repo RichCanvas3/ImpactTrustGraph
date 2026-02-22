@@ -22,6 +22,8 @@ export type AppRole = "admin" | "coordinator" | "org_admin" | "contributor" | "f
 export type AppViewId =
   | "dashboard"
   | "agent-registry"
+  | "user-tools"
+  | "user-settings"
   | "coordination-hub"
   | "trust-trail"
   | "opportunities"

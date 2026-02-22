@@ -34,7 +34,7 @@ import { createPublicClient, http } from "viem";
 import type { Address } from "viem";
 import { parseUaidParts } from "../../lib/uaid";
 
-type OrgSettingsTab = "settings" | "operations" | "agent";
+type OrgSettingsTab = "settings" | "agent";
 type OrgRoleTag = "coalition" | "contributor" | "funding" | "member";
 
 function safeParseJson(input: string | null | undefined): any | null {
@@ -569,7 +569,7 @@ export default function CoalitionSettingsPage() {
               Coalition Settings
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Manage your coalition organization agent (Organization, Operations, Agent).
+              Manage your coalition organization agent (Organization, Agent).
             </Typography>
           </Box>
 
@@ -614,9 +614,8 @@ export default function CoalitionSettingsPage() {
 
           <Card variant="outlined" sx={{ borderRadius: 3 }}>
             <CardContent sx={{ pb: 0 }}>
-              <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 1 }}>
+              <Tabs value={tab} onChange={(_, v) => setTab(v as OrgSettingsTab)} sx={{ mb: 1 }}>
                 <Tab value="settings" label="Organization" />
-                <Tab value="operations" label="Operations" />
                 <Tab value="agent" label="Agent" sx={{ ml: "auto" }} />
               </Tabs>
             </CardContent>
@@ -680,7 +679,7 @@ export default function CoalitionSettingsPage() {
                     </Button>
                   </Stack>
                 </Stack>
-              ) : tab === "agent" ? (
+              ) : (
                 <Stack spacing={2}>
                   <Typography sx={{ fontWeight: 800 }}>Agent information</Typography>
                   <Typography variant="body2" color="text.secondary">
@@ -722,51 +721,32 @@ export default function CoalitionSettingsPage() {
 
                   <Card variant="outlined" sx={{ borderRadius: 2 }}>
                     <CardContent>
+                      <Typography sx={{ fontWeight: 800 }}>Session package</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        Generate a session package and persist it to the canonical <code>agents</code> record (and organization record).
+                      </Typography>
+
+                      {sessionError ? <Alert severity="error" sx={{ mt: 1 }}>{sessionError}</Alert> : null}
+
+                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                        <Button variant="contained" onClick={() => void handleGenerateSessionPackage()} disabled={saving}>
+                          Generate + save session package
+                        </Button>
+                        <Button variant="outlined" onClick={() => void handleSaveSessionPackage()} disabled={saving || !sessionPkg}>
+                          Save to agent record
+                        </Button>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+
+                  <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                    <CardContent>
                       <Typography sx={{ fontWeight: 800, mb: 1 }}>Hydrated agent details (by UAID)</Typography>
                       <pre style={{ margin: 0, overflowX: "auto", fontSize: 12 }}>
                         {JSON.stringify(agentDetails ?? { message: "none" }, null, 2)}
                       </pre>
                     </CardContent>
                   </Card>
-
-                  <Card variant="outlined" sx={{ borderRadius: 2 }}>
-                    <CardContent>
-                      <Typography sx={{ fontWeight: 800, mb: 1 }}>A2A agent card JSON</Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                        {agentCardUrl ? `Source: ${agentCardUrl}` : "Source: (not fetched yet)"}
-                      </Typography>
-                      <pre style={{ margin: 0, overflowX: "auto", fontSize: 12 }}>
-                        {JSON.stringify(agentCardJson ?? { message: "none" }, null, 2)}
-                      </pre>
-                    </CardContent>
-                  </Card>
-                </Stack>
-              ) : (
-                <Stack spacing={2}>
-                  <Typography sx={{ fontWeight: 800 }}>Agent operator</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Generate a session package and persist it to the canonical `agents` record (and organization record).
-                  </Typography>
-
-                  {sessionError ? <Alert severity="error">{sessionError}</Alert> : null}
-                  {agentCardError ? <Alert severity="error">{agentCardError}</Alert> : null}
-                  {a2aStatusError ? <Alert severity="error">{a2aStatusError}</Alert> : null}
-                  {a2aStatusResult ? <Alert severity="success">A2A status: success</Alert> : null}
-
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    <Button variant="contained" onClick={() => void handleGenerateSessionPackage()} disabled={saving}>
-                      Generate + save session package
-                    </Button>
-                    <Button variant="outlined" onClick={() => void handleGetA2aAgentCardJson()} disabled={saving || agentCardLoading}>
-                      {agentCardLoading ? "Fetching agent card…" : "Get A2A agent card JSON"}
-                    </Button>
-                    <Button variant="outlined" onClick={() => void handleCheckA2aStatus()} disabled={saving || a2aStatusLoading}>
-                      {a2aStatusLoading ? "Checking status…" : "Check A2A status"}
-                    </Button>
-                    <Button variant="outlined" onClick={() => void handleSaveSessionPackage()} disabled={saving || !sessionPkg}>
-                      Save to agent record
-                    </Button>
-                  </Stack>
 
                   <Card variant="outlined" sx={{ borderRadius: 2 }}>
                     <CardContent>
