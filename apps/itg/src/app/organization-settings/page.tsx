@@ -145,6 +145,9 @@ export default function OrganizationSettingsPage() {
   const [agentCardUrl, setAgentCardUrl] = React.useState<string | null>(null);
   const [agentCardLoading, setAgentCardLoading] = React.useState(false);
   const [agentCardError, setAgentCardError] = React.useState<string | null>(null);
+  const [a2aStatusLoading, setA2aStatusLoading] = React.useState(false);
+  const [a2aStatusError, setA2aStatusError] = React.useState<string | null>(null);
+  const [a2aStatusResult, setA2aStatusResult] = React.useState<any | null>(null);
   const [agentDetails, setAgentDetails] = React.useState<any | null>(null);
   const [agentDetailsLoading, setAgentDetailsLoading] = React.useState(false);
   const [agentDetailsError, setAgentDetailsError] = React.useState<string | null>(null);
@@ -503,6 +506,31 @@ export default function OrganizationSettingsPage() {
     }
   }, [individualId, organization?.uaid, hydrateSelectedOrg]);
 
+  const handleCheckA2aStatus = React.useCallback(async () => {
+    setA2aStatusError(null);
+    setA2aStatusResult(null);
+    setA2aStatusLoading(true);
+    try {
+      if (!individualId) throw new Error("Missing individualId (profile not hydrated).");
+      const effectiveUaid =
+        typeof organization?.uaid === "string" && organization.uaid.trim()
+          ? organization.uaid.trim()
+          : (await hydrateSelectedOrg()).uaid;
+      if (!effectiveUaid) throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
+
+      const res = await fetch(`/api/agents/a2a-status/${encodeURIComponent(effectiveUaid)}`, { method: "GET" });
+      const json = await res.json().catch(() => null as any);
+      if (!res.ok || !json || json.success !== true) {
+        throw new Error(json?.message || json?.error || `Failed to call agent.status (${res.status})`);
+      }
+      setA2aStatusResult(json);
+    } catch (e: any) {
+      setA2aStatusError(e?.message || String(e));
+    } finally {
+      setA2aStatusLoading(false);
+    }
+  }, [individualId, organization?.uaid, hydrateSelectedOrg]);
+
   const handleRefreshAgentDetails = React.useCallback(async () => {
     setAgentDetails(null);
     setAgentDetailsError(null);
@@ -698,6 +726,8 @@ export default function OrganizationSettingsPage() {
 
                   {agentDetailsError ? <Alert severity="error">{agentDetailsError}</Alert> : null}
                   {agentCardError ? <Alert severity="error">{agentCardError}</Alert> : null}
+                  {a2aStatusError ? <Alert severity="error">{a2aStatusError}</Alert> : null}
+                  {a2aStatusResult ? <Alert severity="success">A2A status: success</Alert> : null}
 
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                     <Button
@@ -713,6 +743,9 @@ export default function OrganizationSettingsPage() {
                       disabled={saving || agentCardLoading}
                     >
                       {agentCardLoading ? "Fetching agent card…" : "Get A2A agent card JSON"}
+                    </Button>
+                    <Button variant="outlined" onClick={() => void handleCheckA2aStatus()} disabled={saving || a2aStatusLoading}>
+                      {a2aStatusLoading ? "Checking status…" : "Check A2A status"}
                     </Button>
                   </Stack>
 
@@ -762,6 +795,8 @@ export default function OrganizationSettingsPage() {
 
                   {sessionError ? <Alert severity="error">{sessionError}</Alert> : null}
                   {agentCardError ? <Alert severity="error">{agentCardError}</Alert> : null}
+                  {a2aStatusError ? <Alert severity="error">{a2aStatusError}</Alert> : null}
+                  {a2aStatusResult ? <Alert severity="success">A2A status: success</Alert> : null}
 
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                     <Button variant="contained" onClick={() => void handleGenerateSessionPackage()} disabled={saving}>
@@ -773,6 +808,9 @@ export default function OrganizationSettingsPage() {
                       disabled={saving || agentCardLoading}
                     >
                       {agentCardLoading ? "Fetching agent card…" : "Get A2A agent card JSON"}
+                    </Button>
+                    <Button variant="outlined" onClick={() => void handleCheckA2aStatus()} disabled={saving || a2aStatusLoading}>
+                      {a2aStatusLoading ? "Checking status…" : "Check A2A status"}
                     </Button>
                     <Button
                       variant="outlined"

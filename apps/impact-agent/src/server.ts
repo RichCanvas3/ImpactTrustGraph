@@ -48,10 +48,10 @@ function serializeBigInt(obj: any): any {
 const getAgenticTrustClient = async (): Promise<any> => {
   throw new Error("Agentic Trust SDK is disabled in the full-Worker build (size limits).");
 };
-const processValidationRequests = async (): Promise<any[]> => {
+const processValidationRequests = async (..._args: any[]): Promise<any[]> => {
   throw new Error("Validation processing is disabled in the full-Worker build (size limits).");
 };
-const getAgentValidationsSummary = async (): Promise<any> => {
+const getAgentValidationsSummary = async (..._args: any[]): Promise<any> => {
   throw new Error("Validation summary is disabled in the full-Worker build (size limits).");
 };
 
@@ -484,6 +484,15 @@ app.get('/.well-known/agent-card.json', async (c) => {
           'Issue a signed ERC-8004 feedbackAuth token for a client to submit feedback to the identity registry. Requires clientAddress in payload.',
       },
       {
+        id: 'agent.status',
+        name: 'agent.status',
+        tags: ['a2a', 'status', 'health'],
+        examples: ['Check agent status', 'Return agent health/status'],
+        inputModes: ['text', 'json'],
+        outputModes: ['json'],
+        description: 'Return basic status/health information for this agent endpoint.',
+      },
+      {
         id: 'agent.validation.respond',
         name: 'agent.validation.respond',
         tags: ['erc8004', 'validation', 'ens', 'a2a'],
@@ -783,7 +792,22 @@ async function handleA2aRequest(c: any) {
     };
 
     // Skill handlers
-    if (skillId === 'general_movie_chat') {
+    if (skillId === 'agent.status' || skillId === 'a2a.status' || skillId === 'status') {
+      responseContent.skill = 'agent.status';
+      responseContent.status = {
+        ok: true,
+        agentName,
+        ensName,
+        agentId: agentId || null,
+        timestamp: new Date().toISOString(),
+        deployTimestamp: DEPLOY_TIMESTAMP,
+      };
+      return c.json({
+        success: true,
+        messageId: `msg_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+        response: responseContent,
+      });
+    } else if (skillId === 'general_movie_chat') {
       const userMessage = (message || '').toLowerCase();
       if (userMessage.includes('inception')) {
         responseContent.response =
