@@ -28,7 +28,6 @@ async function ensureAgentsSchema(db: D1Database) {
         agent_name TEXT,
         email_domain TEXT,
         session_package TEXT,
-        agent_card_json TEXT,
         created_at INTEGER NOT NULL DEFAULT (unixepoch()),
         updated_at INTEGER NOT NULL DEFAULT (unixepoch())
       );`,
@@ -43,7 +42,6 @@ async function ensureAgentsSchema(db: D1Database) {
       { name: "agent_name", sql: "ALTER TABLE agents ADD COLUMN agent_name TEXT" },
       { name: "email_domain", sql: "ALTER TABLE agents ADD COLUMN email_domain TEXT" },
       { name: "session_package", sql: "ALTER TABLE agents ADD COLUMN session_package TEXT" },
-      { name: "agent_card_json", sql: "ALTER TABLE agents ADD COLUMN agent_card_json TEXT" },
       { name: "created_at", sql: "ALTER TABLE agents ADD COLUMN created_at INTEGER NOT NULL DEFAULT (unixepoch())" },
       { name: "updated_at", sql: "ALTER TABLE agents ADD COLUMN updated_at INTEGER NOT NULL DEFAULT (unixepoch())" },
     ];
@@ -366,7 +364,6 @@ export async function POST(request: NextRequest) {
                  ens_name = COALESCE(?, ens_name),
                  agent_name = COALESCE(?, agent_name),
                  email_domain = COALESCE(?, email_domain),
-                 agent_card_json = COALESCE(?, agent_card_json),
                  updated_at = ?
              WHERE id = ?`,
           ).bind(
@@ -374,7 +371,6 @@ export async function POST(request: NextRequest) {
             ensName,
             agentName,
             emailDomain,
-            null,
             now,
             existingAgent.id,
           ).run();
@@ -382,8 +378,8 @@ export async function POST(request: NextRequest) {
         } else {
           const ins = await db.prepare(
             `INSERT INTO agents
-             (uaid, ens_name, agent_name, email_domain, session_package, agent_card_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)`,
+             (uaid, ens_name, agent_name, email_domain, session_package, created_at, updated_at)
+             VALUES (?, ?, ?, ?, NULL, ?, ?)`,
           ).bind(
             uaid,
             ensName,

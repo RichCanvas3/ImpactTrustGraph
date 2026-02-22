@@ -31,7 +31,7 @@ import { createPublicClient, http } from "viem";
 import type { Address } from "viem";
 import { parseUaidParts } from "../../lib/uaid";
 
-type OrgSettingsTab = "settings" | "operations";
+type OrgSettingsTab = "settings" | "operations" | "agent";
 
 function safeParseJson(input: string | null | undefined): any | null {
   if (!input) return null;
@@ -141,8 +141,16 @@ export default function OrganizationSettingsPage() {
   // Operations
   const [sessionPkg, setSessionPkg] = React.useState<any | null>(null);
   const [sessionError, setSessionError] = React.useState<string | null>(null);
+  const [agentCardJson, setAgentCardJson] = React.useState<any | null>(null);
+  const [agentCardUrl, setAgentCardUrl] = React.useState<string | null>(null);
+  const [agentCardLoading, setAgentCardLoading] = React.useState(false);
+  const [agentCardError, setAgentCardError] = React.useState<string | null>(null);
+  const [agentDetails, setAgentDetails] = React.useState<any | null>(null);
+  const [agentDetailsLoading, setAgentDetailsLoading] = React.useState(false);
+  const [agentDetailsError, setAgentDetailsError] = React.useState<string | null>(null);
 
   const agentHydrateKeyRef = React.useRef<string | null>(null);
+  const agentDetailsKeyRef = React.useRef<string | null>(null);
 
   const hydrateKeyRef = React.useRef<string | null>(null);
   React.useEffect(() => {
@@ -194,52 +202,21 @@ export default function OrganizationSettingsPage() {
   const parsedUaid = parseUaidParts(uaid);
   const agentAccount = defaultOrgAgent?.agentAccount ?? parsedUaid?.agentAccount ?? null;
   const chainId = (defaultOrgAgent?.chainId ?? parsedUaid?.chainId ?? 11155111) as number;
-  const agentId = React.useMemo(() => {
-    const fromCard = safeParseJson(organization?.agent_card_json ?? null);
-    const fromCardId =
-      fromCard?.agentId ?? fromCard?.agent_id ?? fromCard?.id ?? fromCard?.agent?.agentId ?? null;
-    return (
-      coerceAgentIdToNumber(fromCardId) ??
-      coerceAgentIdToNumber(defaultOrgAgent?.agentId) ??
-      null
-    );
-  }, [organization?.agent_card_json, defaultOrgAgent?.agentId]);
+  const agentId = React.useMemo(() => coerceAgentIdToNumber(defaultOrgAgent?.agentId) ?? null, [defaultOrgAgent?.agentId]);
 
   const hydrateSelectedOrg = React.useCallback(async () => {
     if (!individualId) throw new Error("Missing individualId (profile not hydrated).");
     if (!organization?.ens_name) throw new Error("Missing organization ENS name.");
-    const resolvedChainId = Number(parseUaidParts(organization.uaid)?.chainId ?? chainId ?? 11155111);
-    if (!Number.isFinite(resolvedChainId)) throw new Error("Invalid chainId for organization.");
-
-    // ENS → smart-account (AA) address
-    const didEns = `did:ens:${resolvedChainId}:${organization.ens_name}`;
-    const ensResp = await fetch(`/api/names/${encodeURIComponent(didEns)}`);
-    if (!ensResp.ok) throw new Error("Failed to resolve org ENS to agent account.");
-    const ensData = await ensResp.json().catch(() => null);
-    const resolvedAccount = ensData?.nameInfo?.account;
-    if (!resolvedAccount || typeof resolvedAccount !== "string" || !resolvedAccount.startsWith("0x")) {
-      throw new Error("ENS did not resolve to a smart-account address.");
-    }
-
-    // AA account → agent card (contains agentId)
-    const didEthr = `did:ethr:${resolvedChainId}:${resolvedAccount}`;
-    const agentResp = await fetch(`/api/agents/by-account/${encodeURIComponent(didEthr)}`);
-    const agentData = agentResp.ok ? await agentResp.json().catch(() => null) : null;
-    const discoveredUaid =
-      agentData && agentData.found === true
-        ? (typeof (agentData as any).uaid === "string" && (agentData as any).uaid.trim()
-            ? String((agentData as any).uaid).trim()
-            : typeof (agentData as any).agent?.uaid === "string" && (agentData as any).agent.uaid.trim()
-              ? String((agentData as any).agent.uaid).trim()
-              : null)
-        : null;
-    const effectiveUaid =
-      typeof organization.uaid === "string" && organization.uaid.trim() ? organization.uaid.trim() : discoveredUaid;
+    const effectiveUaid = typeof organization.uaid === "string" && organization.uaid.trim() ? organization.uaid.trim() : null;
     if (!effectiveUaid) {
       throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
     }
-    const agentCardJson =
-      agentData && agentData.found === true ? JSON.stringify({ ...agentData }) : organization.agent_card_json ?? null;
+
+    // UAID → agent details (contains agentId). This is the canonical hydration path.
+    const agentResp = await fetch(`/api/agents/by-uaid/${encodeURIComponent(effectiveUaid)}`);
+    const agentData = agentResp.ok ? await agentResp.json().catch(() => null) : null;
+    const hydratedAgentId =
+      agentData && agentData.found === true ? coerceAgentIdToNumber((agentData as any)?.agentId ?? (agentData as any)?.agent?.agentId ?? null) : null;
 
     // Persist to organizations + individual_organizations (no email/EOA)
     await upsertUserOrganizationByIndividualId({
@@ -251,7 +228,6 @@ export default function OrganizationSettingsPage() {
       org_type: organization.org_type ?? null,
       uaid: effectiveUaid,
       session_package: organization.session_package ?? null,
-      agent_card_json: agentCardJson,
       org_metadata: organization.org_metadata ?? null,
       is_primary: organization.is_primary,
       role: organization.role ?? null,
@@ -269,9 +245,9 @@ export default function OrganizationSettingsPage() {
     setOrganization(refreshed);
 
     return {
-      agentId: coerceAgentIdToNumber((agentData as any)?.agentId ?? (agentData as any)?.agent_id ?? null),
-      agentAccount: resolvedAccount.toLowerCase(),
-      chainId: resolvedChainId,
+      agentId: hydratedAgentId,
+      agentAccount: parseUaidParts(effectiveUaid)?.agentAccount ?? null,
+      chainId: parseUaidParts(effectiveUaid)?.chainId ?? chainId,
       uaid: effectiveUaid,
     };
   }, [individualId, organization, chainId, defaultOrgAgent?.ensName]);
@@ -281,7 +257,6 @@ export default function OrganizationSettingsPage() {
     if (!organization) return;
     if (!organization.ens_name) return;
     const needsHydration =
-      !organization.agent_card_json ||
       organization.agent_row_id == null;
     if (!needsHydration) return;
 
@@ -338,7 +313,6 @@ export default function OrganizationSettingsPage() {
         org_type: updated.org_type ?? null,
         uaid: effectiveUaid,
         session_package: updated.session_package ?? null,
-        agent_card_json: updated.agent_card_json ?? null,
         org_metadata: updated.org_metadata ?? null,
         is_primary: updated.is_primary,
         role: updated.role ?? null,
@@ -473,7 +447,6 @@ export default function OrganizationSettingsPage() {
           org_type: organization.org_type ?? null,
           uaid: effectiveUaid,
           session_package: JSON.stringify(pkg),
-          agent_card_json: organization.agent_card_json ?? null,
           org_metadata: organization.org_metadata ?? null,
           is_primary: organization.is_primary,
           role: organization.role ?? null,
@@ -502,6 +475,71 @@ export default function OrganizationSettingsPage() {
     individualId,
     hydrateSelectedOrg,
   ]);
+
+  const handleGetA2aAgentCardJson = React.useCallback(async () => {
+    setAgentCardJson(null);
+    setAgentCardUrl(null);
+    setAgentCardError(null);
+    setAgentCardLoading(true);
+    try {
+      if (!individualId) throw new Error("Missing individualId (profile not hydrated).");
+      const effectiveUaid =
+        typeof organization?.uaid === "string" && organization.uaid.trim()
+          ? organization.uaid.trim()
+          : (await hydrateSelectedOrg()).uaid;
+      if (!effectiveUaid) throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
+
+      const res = await fetch(`/api/agents/a2a-card/${encodeURIComponent(effectiveUaid)}`, { method: "GET" });
+      const json = await res.json().catch(() => null as any);
+      if (!res.ok || !json || json.success !== true) {
+        throw new Error(json?.message || json?.error || `Failed to fetch agent card (${res.status})`);
+      }
+      setAgentCardJson(json.card ?? null);
+      setAgentCardUrl(typeof json.cardUrl === "string" ? json.cardUrl : null);
+    } catch (e: any) {
+      setAgentCardError(e?.message || String(e));
+    } finally {
+      setAgentCardLoading(false);
+    }
+  }, [individualId, organization?.uaid, hydrateSelectedOrg]);
+
+  const handleRefreshAgentDetails = React.useCallback(async () => {
+    setAgentDetails(null);
+    setAgentDetailsError(null);
+    setAgentDetailsLoading(true);
+    try {
+      if (!individualId) throw new Error("Missing individualId (profile not hydrated).");
+      const effectiveUaid =
+        typeof organization?.uaid === "string" && organization.uaid.trim()
+          ? organization.uaid.trim()
+          : (await hydrateSelectedOrg()).uaid;
+      if (!effectiveUaid) throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
+
+      const key = `${individualId}:${effectiveUaid}`;
+      agentDetailsKeyRef.current = key;
+
+      const res = await fetch(`/api/agents/by-uaid/${encodeURIComponent(effectiveUaid)}`, { method: "GET" });
+      const json = await res.json().catch(() => null as any);
+      if (!res.ok || !json || json.found !== true) {
+        throw new Error(json?.message || json?.error || `Failed to hydrate agent details (${res.status})`);
+      }
+      setAgentDetails(json);
+    } catch (e: any) {
+      setAgentDetailsError(e?.message || String(e));
+    } finally {
+      setAgentDetailsLoading(false);
+    }
+  }, [individualId, organization?.uaid, hydrateSelectedOrg]);
+
+  React.useEffect(() => {
+    if (tab !== "agent") return;
+    if (!individualId) return;
+    const effectiveUaid = typeof organization?.uaid === "string" && organization.uaid.trim() ? organization.uaid.trim() : null;
+    if (!effectiveUaid) return;
+    const key = `${individualId}:${effectiveUaid}`;
+    if (agentDetailsKeyRef.current === key && agentDetails) return;
+    void handleRefreshAgentDetails();
+  }, [tab, individualId, organization?.uaid, agentDetails, handleRefreshAgentDetails]);
 
   const handleSaveSessionPackage = React.useCallback(async () => {
     if (!walletAddress) {
@@ -537,7 +575,6 @@ export default function OrganizationSettingsPage() {
         org_type: organization.org_type ?? null,
         uaid: effectiveUaid,
         session_package: JSON.stringify(sessionPkg),
-        agent_card_json: organization.agent_card_json ?? null,
         org_metadata: organization.org_metadata ?? null,
         is_primary: organization.is_primary,
         role: organization.role ?? null,
@@ -616,6 +653,7 @@ export default function OrganizationSettingsPage() {
               <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 1 }}>
                 <Tab value="settings" label="Organization" />
                 <Tab value="operations" label="Operations" />
+                <Tab value="agent" label="Agent" sx={{ ml: "auto" }} />
               </Tabs>
             </CardContent>
             <Divider />
@@ -651,6 +689,70 @@ export default function OrganizationSettingsPage() {
                     </Button>
                   </Stack>
                 </Stack>
+              ) : tab === "agent" ? (
+                <Stack spacing={2}>
+                  <Typography sx={{ fontWeight: 800 }}>Agent information</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    UAID is canonical. This view hydrates agent details by UAID (like the admin app agent details page).
+                  </Typography>
+
+                  {agentDetailsError ? <Alert severity="error">{agentDetailsError}</Alert> : null}
+                  {agentCardError ? <Alert severity="error">{agentCardError}</Alert> : null}
+
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Button
+                      variant="contained"
+                      onClick={() => void handleRefreshAgentDetails()}
+                      disabled={saving || agentDetailsLoading}
+                    >
+                      {agentDetailsLoading ? "Refreshing…" : "Refresh agent info"}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={() => void handleGetA2aAgentCardJson()}
+                      disabled={saving || agentCardLoading}
+                    >
+                      {agentCardLoading ? "Fetching agent card…" : "Get A2A agent card JSON"}
+                    </Button>
+                  </Stack>
+
+                  <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                    <CardContent>
+                      <Typography sx={{ fontWeight: 800, mb: 1 }}>Identifiers</Typography>
+                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                        <Chip label={agentName ?? "—"} />
+                        <Chip label={`chain ${chainId}`} variant="outlined" />
+                        {uaid ? <Chip label={`UAID: ${uaid}`} variant="outlined" /> : null}
+                        {agentId != null ? <Chip label={`agentId: ${agentId}`} variant="outlined" /> : null}
+                        {agentAccount ? <Chip label={`account: ${agentAccount}`} variant="outlined" /> : null}
+                      </Stack>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                        ENS: <strong>{ensName ?? "—"}</strong>
+                      </Typography>
+                    </CardContent>
+                  </Card>
+
+                  <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                    <CardContent>
+                      <Typography sx={{ fontWeight: 800, mb: 1 }}>Hydrated agent details (by UAID)</Typography>
+                      <pre style={{ margin: 0, overflowX: "auto", fontSize: 12 }}>
+                        {JSON.stringify(agentDetails ?? { message: "none" }, null, 2)}
+                      </pre>
+                    </CardContent>
+                  </Card>
+
+                  <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                    <CardContent>
+                      <Typography sx={{ fontWeight: 800, mb: 1 }}>A2A agent card JSON</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        {agentCardUrl ? `Source: ${agentCardUrl}` : "Source: (not fetched yet)"}
+                      </Typography>
+                      <pre style={{ margin: 0, overflowX: "auto", fontSize: 12 }}>
+                        {JSON.stringify(agentCardJson ?? { message: "none" }, null, 2)}
+                      </pre>
+                    </CardContent>
+                  </Card>
+                </Stack>
               ) : (
                 <Stack spacing={2}>
                   <Typography sx={{ fontWeight: 800 }}>Agent operator</Typography>
@@ -659,10 +761,18 @@ export default function OrganizationSettingsPage() {
                   </Typography>
 
                   {sessionError ? <Alert severity="error">{sessionError}</Alert> : null}
+                  {agentCardError ? <Alert severity="error">{agentCardError}</Alert> : null}
 
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                     <Button variant="contained" onClick={() => void handleGenerateSessionPackage()} disabled={saving}>
                       Generate + save session package
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={() => void handleGetA2aAgentCardJson()}
+                      disabled={saving || agentCardLoading}
+                    >
+                      {agentCardLoading ? "Fetching agent card…" : "Get A2A agent card JSON"}
                     </Button>
                     <Button
                       variant="outlined"
@@ -672,6 +782,18 @@ export default function OrganizationSettingsPage() {
                       Save to agent record
                     </Button>
                   </Stack>
+
+                  <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                    <CardContent>
+                      <Typography sx={{ fontWeight: 800, mb: 1 }}>A2A agent card JSON</Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        {agentCardUrl ? `Source: ${agentCardUrl}` : "Source: (not fetched yet)"}
+                      </Typography>
+                      <pre style={{ margin: 0, overflowX: "auto", fontSize: 12 }}>
+                        {JSON.stringify(agentCardJson ?? { message: "none" }, null, 2)}
+                      </pre>
+                    </CardContent>
+                  </Card>
 
                   <Card variant="outlined" sx={{ borderRadius: 2 }}>
                     <CardContent>

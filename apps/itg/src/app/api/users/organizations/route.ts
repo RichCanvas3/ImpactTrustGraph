@@ -40,13 +40,6 @@ async function ensureOrganizationsSchema(db: D1Database) {
         // ignore
       }
     }
-    if (!existing.has("agent_card_json")) {
-      try {
-        await db.prepare("ALTER TABLE organizations ADD COLUMN agent_card_json TEXT").run();
-      } catch {
-        // ignore
-      }
-    }
     if (!existing.has("org_metadata")) {
       try {
         await db.prepare("ALTER TABLE organizations ADD COLUMN org_metadata TEXT").run();
@@ -70,7 +63,6 @@ async function ensureAgentsSchema(db: D1Database) {
         agent_name TEXT,
         email_domain TEXT,
         session_package TEXT,
-        agent_card_json TEXT,
         created_at INTEGER NOT NULL DEFAULT (unixepoch()),
         updated_at INTEGER NOT NULL DEFAULT (unixepoch())
       );`,
@@ -165,7 +157,6 @@ export async function GET(request: NextRequest) {
       org_address: string | null;
       org_type: string | null;
       email_domain: string;
-      agent_card_json?: string | null;
       is_primary: number; // SQLite stores boolean as 0/1
       role: string | null;
     }>();
@@ -181,7 +172,6 @@ export async function GET(request: NextRequest) {
       uaid: (row as any).uaid ?? null,
       agent_row_id: (row as any).agent_row_id ?? null,
       session_package: (row as any).session_package ?? null,
-      agent_card_json: (row as any).agent_card_json ?? null,
       org_metadata: (row as any).org_metadata ?? null,
       is_primary: row.is_primary === 1,
       role: row.role,
@@ -217,7 +207,6 @@ export async function POST(request: NextRequest) {
       email_domain,
       uaid,
       session_package,
-      agent_card_json,
       org_metadata,
       is_primary,
       role,
@@ -238,23 +227,7 @@ export async function POST(request: NextRequest) {
       typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
     const cleanedEoa =
       typeof eoa_address === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa_address) ? eoa_address : null;
-    let uaidValue = typeof uaid === "string" && uaid.trim() ? uaid.trim() : null;
-
-    // Best-effort UAID hydration (canonical). Accept UAID from agent_card_json if present.
-    if (!uaidValue && typeof agent_card_json === "string" && agent_card_json.trim()) {
-      try {
-        const parsed = JSON.parse(agent_card_json);
-        const candidate =
-          typeof parsed?.uaid === "string"
-            ? parsed.uaid
-            : typeof parsed?.agent?.uaid === "string"
-              ? parsed.agent.uaid
-              : null;
-        if (candidate && String(candidate).trim()) uaidValue = String(candidate).trim();
-      } catch {
-        // ignore
-      }
-    }
+    const uaidValue = typeof uaid === "string" && uaid.trim() ? uaid.trim() : null;
 
     if (!individualIdFromBody || !ens_name || !agent_name || !uaidValue) {
       return NextResponse.json(
@@ -339,7 +312,6 @@ export async function POST(request: NextRequest) {
                  agent_name = COALESCE(?, agent_name),
                  email_domain = COALESCE(?, email_domain),
                  session_package = COALESCE(?, session_package),
-                 agent_card_json = COALESCE(?, agent_card_json),
                  updated_at = ?
              WHERE id = ?`,
           ).bind(
@@ -348,7 +320,6 @@ export async function POST(request: NextRequest) {
             agent_name,
             resolvedEmailDomain,
             typeof session_package === "string" ? session_package : null,
-            typeof agent_card_json === "string" ? agent_card_json : null,
             now,
             existingAgent.id,
           ).run();
@@ -356,15 +327,14 @@ export async function POST(request: NextRequest) {
         } else {
           const ins = await db.prepare(
             `INSERT INTO agents
-             (uaid, ens_name, agent_name, email_domain, session_package, agent_card_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             (uaid, ens_name, agent_name, email_domain, session_package, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
           ).bind(
             uaidValue,
             ens_name,
             agent_name,
             resolvedEmailDomain,
             typeof session_package === "string" ? session_package : null,
-            typeof agent_card_json === "string" ? agent_card_json : null,
             now,
             now,
           ).run();
@@ -377,8 +347,8 @@ export async function POST(request: NextRequest) {
       const insertResult = await db.prepare(
         `INSERT INTO organizations 
          (ens_name, agent_name, org_name, org_address, org_type, email_domain, 
-          uaid, agent_row_id, session_package, agent_card_json, org_metadata, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          uaid, agent_row_id, session_package, org_metadata, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         ens_name,
         agent_name,
@@ -389,7 +359,6 @@ export async function POST(request: NextRequest) {
         uaidValue,
         agentRowId,
         typeof session_package === "string" ? session_package : null,
-        typeof agent_card_json === "string" ? agent_card_json : null,
         typeof org_metadata === "string" ? org_metadata : null,
         now,
         now,
@@ -415,7 +384,6 @@ export async function POST(request: NextRequest) {
                  agent_name = COALESCE(?, agent_name),
                  email_domain = COALESCE(?, email_domain),
                  session_package = COALESCE(?, session_package),
-                 agent_card_json = COALESCE(?, agent_card_json),
                  updated_at = ?
              WHERE id = ?`,
           ).bind(
@@ -424,7 +392,6 @@ export async function POST(request: NextRequest) {
             agent_name,
             resolvedEmailDomain,
             typeof session_package === "string" ? session_package : null,
-            typeof agent_card_json === "string" ? agent_card_json : null,
             now,
             existingAgent.id,
           ).run();
@@ -432,15 +399,14 @@ export async function POST(request: NextRequest) {
         } else {
           const ins = await db.prepare(
             `INSERT INTO agents
-             (uaid, ens_name, agent_name, email_domain, session_package, agent_card_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             (uaid, ens_name, agent_name, email_domain, session_package, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
           ).bind(
             uaidValue,
             ens_name,
             agent_name,
             resolvedEmailDomain,
             typeof session_package === "string" ? session_package : null,
-            typeof agent_card_json === "string" ? agent_card_json : null,
             now,
             now,
           ).run();
@@ -455,7 +421,6 @@ export async function POST(request: NextRequest) {
          SET agent_name = ?, org_name = ?, org_address = ?, org_type = ?, 
              uaid = ?, agent_row_id = COALESCE(?, agent_row_id),
              session_package = COALESCE(?, session_package),
-             agent_card_json = COALESCE(?, agent_card_json),
              org_metadata = COALESCE(?, org_metadata), updated_at = ?
          WHERE ens_name = ?`,
       ).bind(
@@ -466,7 +431,6 @@ export async function POST(request: NextRequest) {
         uaidValue,
         agentRowId,
         typeof session_package === "string" ? session_package : null,
-        typeof agent_card_json === "string" ? agent_card_json : null,
         typeof org_metadata === "string" ? org_metadata : null,
         now,
         ens_name,
@@ -501,8 +465,8 @@ export async function POST(request: NextRequest) {
         } else {
           await db.prepare(
             `INSERT INTO agents
-             (uaid, ens_name, agent_name, email_domain, session_package, agent_card_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)`,
+             (uaid, ens_name, agent_name, email_domain, session_package, created_at, updated_at)
+             VALUES (?, ?, ?, ?, NULL, ?, ?)`,
           ).bind(
             pUaid,
             p?.participant_ens_name ?? null,

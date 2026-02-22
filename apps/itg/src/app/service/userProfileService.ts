@@ -44,7 +44,6 @@ export interface OrganizationAssociation {
   uaid?: string | null;
   agent_row_id?: number | null;
   session_package?: string | null;
-  agent_card_json?: string | null;
   org_metadata?: string | null; // JSON string
   is_primary?: boolean;
   role?: string;
@@ -214,7 +213,6 @@ export async function upsertUserOrganizationByIndividualId(input: {
   org_type?: string | null;
   uaid: string;
   session_package?: string | null;
-  agent_card_json?: string | null;
   org_metadata?: string | null;
   is_primary?: boolean;
   role?: string | null;

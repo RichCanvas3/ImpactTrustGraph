@@ -1131,8 +1131,8 @@ export default function AgentsRoute() {
                     ? buildDid8004(targetChainId, BigInt(targetAgentId))
                     : undefined;
 
-                  // Send A2A message to agents-admin.8004-agent.io
-                  const a2aEndpoint = 'https://agents-admin.8004-agent.io/api/a2a';
+                  // Send A2A message to agents-admin.impact-agent.io
+                  const a2aEndpoint = 'https://agents-admin.impact-agent.io/api/a2a';
                   
                   console.log('[Feedback Request] Sending A2A message to:', a2aEndpoint);
                   console.log('[Feedback Request] Payload:', {

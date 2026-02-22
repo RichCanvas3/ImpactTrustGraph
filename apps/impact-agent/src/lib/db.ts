@@ -44,9 +44,10 @@ export interface Organization {
   org_address: string | null;
   org_type: string | null;
   email_domain: string;
-  agent_account: string | null;
-  chain_id: number;
+  uaid: string | null;
   session_package: string | null; // JSON string of sessionPackage
+  agent_card_json?: string | null;
+  org_metadata?: string | null;
   created_at: number;
   updated_at: number;
 }

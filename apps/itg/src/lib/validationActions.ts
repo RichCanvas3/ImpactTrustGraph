@@ -97,7 +97,7 @@ export async function sendValidationRequestMessage(args: {
   } = args;
 
   // Use the inbox service endpoint to ensure message is stored in inbox database
-  const inboxEndpoint = 'https://agents-inbox.8004-agent.io/api/a2a';
+  const inboxEndpoint = 'https://agents-inbox.impact-agent.io/api/a2a';
 
   if (!toAgentDid && !toAgentName) {
     throw new Error('Either toAgentDid or toAgentName is required to send message.');

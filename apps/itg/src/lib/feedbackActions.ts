@@ -300,7 +300,7 @@ export interface MarkFeedbackRequestGivenArgs {
 export async function markFeedbackRequestGivenAction({
   feedbackRequestId,
   txHash,
-  endpoint = 'https://agents-admin.8004-agent.io/api/a2a',
+  endpoint = 'https://agents-admin.impact-agent.io/api/a2a',
 }: MarkFeedbackRequestGivenArgs): Promise<void> {
   const response = await fetch(endpoint, {
     method: 'POST',

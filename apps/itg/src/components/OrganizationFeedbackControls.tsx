@@ -146,7 +146,7 @@ export function OrganizationFeedbackControls({
       const targetChainId = chainId;
       const targetAgentDid = buildDid8004(targetChainId, BigInt(targetAgentId));
 
-      const a2aEndpoint = 'https://agents-admin.8004-agent.io/api/a2a';
+      const a2aEndpoint = 'https://agents-admin.impact-agent.io/api/a2a';
 
       console.log('[Organization Feedback Request] Sending A2A message to:', a2aEndpoint);
       console.log('[Organization Feedback Request] Payload:', {

@@ -135,7 +135,7 @@ export default function MessagesPage() {
         setLoading(true);
         setError(null);
 
-        const a2aEndpoint = 'https://agents-inbox.8004-agent.io/api/a2a';
+        const a2aEndpoint = 'https://agents-inbox.impact-agent.io/api/a2a';
         let allMessages: InboxMessage[] = [];
 
         // For inbox folder, fetch both client messages and agent messages
@@ -466,7 +466,7 @@ export default function MessagesPage() {
         setComposeSubmitting(true);
         setComposeError(null);
 
-        const a2aEndpoint = 'https://agents-inbox.8004-agent.io/api/a2a';
+        const a2aEndpoint = 'https://agents-inbox.impact-agent.io/api/a2a';
         const payload: any = {
           fromClientAddress: walletAddress,
           subject: composeSubject || null,

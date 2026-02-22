@@ -973,7 +973,7 @@ export default function OnboardingPage() {
         // ok to continue
       }
 
-      const agentUrl = `https://${agentName}.8004-agent.io`;
+      const agentUrl = `https://${agentName}.impact-agent.io`;
       const result = await createAgentWithWallet({
         agentData: {
           agentName,
@@ -1284,7 +1284,7 @@ export default function OnboardingPage() {
       let result;
       let agentCreationSuccessful = false;
       try {
-        const agentUrl = `https://${agentName}.8004-agent.io`;
+        const agentUrl = `https://${agentName}.impact-agent.io`;
         result = await createAgentWithWallet({
           agentData: {
             agentName,

@@ -4,22 +4,17 @@
   "private": true,
   "description": "Impact Agent - A2A provider app for ITG agents (Hono)",
   "scripts": {
-    "dev": "wrangler dev src/worker.ts",
+    "dev": "wrangler dev src/server.ts",
     "dev:node": "tsx src/node.ts",
     "deploy": "wrangler deploy",
-    "build": "echo \"@my-scope/impact-agent: no-op build (Hono server)\"",
+    "build": "wrangler deploy --dry-run",
     "start": "NODE_ENV=production tsx src/node.ts",
     "lint": "eslint . --ext ts,tsx,js,jsx"
   },
   "dependencies": {
-    "@agentic-trust/8004-ext-sdk": "1.0.42",
-    "@agentic-trust/8004-sdk": "1.0.42",
-    "@agentic-trust/core": "1.0.42",
     "@hono/node-server": "^1.19.6",
-    "@my-scope/core": "workspace:*",
     "dotenv": "^16.4.5",
-    "hono": "^4.10.7",
-    "viem": "^2.0.0"
+    "hono": "^4.10.7"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

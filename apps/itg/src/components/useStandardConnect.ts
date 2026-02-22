@@ -468,7 +468,6 @@ export function useStandardConnect() {
                 org_type: null as string | null,
                 is_primary: true,
                 role: null as string | null,
-                agent_card_json: null as string | null,
               };
               
               // UAID is canonical. Best-effort: resolve UAID via ENS -> account -> by-account.
@@ -491,16 +490,6 @@ export function useStandardConnect() {
                           : null;
                     if (discoveredUaid) {
                       (orgAssociation as any).uaid = discoveredUaid;
-                    }
-                    // Preserve any agent card payload if available
-                    const card =
-                      agentData && typeof (agentData as any)?.agent_card_json === "string" && String((agentData as any).agent_card_json).trim()
-                        ? String((agentData as any).agent_card_json)
-                        : agentData && typeof (agentData as any)?.agentCardJson === "string" && String((agentData as any).agentCardJson).trim()
-                          ? String((agentData as any).agentCardJson)
-                          : null;
-                    if (card) {
-                      (orgAssociation as any).agent_card_json = card;
                     }
                   }
                 }
@@ -638,6 +627,7 @@ export function useStandardConnect() {
                   : typeof (agentData as any)?.agent?.uaid === "string" && String((agentData as any).agent.uaid).trim()
                     ? String((agentData as any).agent.uaid).trim()
                     : discoveredUaid;
+            // Keep in-memory only (do not persist to DB).
             agentCardJsonToPersist = JSON.stringify(agentResult);
             // Merge the full agent data with the basic agent info
             fullAgent = {
@@ -741,7 +731,6 @@ export function useStandardConnect() {
         org_type: selectedOrg.org_type ?? null,
         uaid: effectiveUaid,
         session_package: selectedOrg.session_package ?? null,
-        agent_card_json: agentCardJsonToPersist ?? selectedOrg.agent_card_json ?? null,
         org_metadata: selectedOrg.org_metadata ?? null,
         is_primary: true,
         role: selectedOrg.role ?? null,

@@ -3,13 +3,11 @@ import { cors } from 'hono/cors';
 
 import {
   getCorsHeaders,
-  //verifyChallenge,
   handleFeedbackAuthRequest,
   loadAgentCard,
   generateAgentCardFromSessionPackage,
   parseDid8004,
-  // types intentionally omitted here to avoid cross-package type resolution issues
-} from '@my-scope/core';
+} from './lib/a2a-core.js';
 
 // Define SessionPackage type locally to avoid import resolution issues with tsx
 type SessionPackage = {
@@ -45,89 +43,21 @@ function serializeBigInt(obj: any): any {
   return obj;
 }
 
-// Lazy load core module using dynamic import (with static string for bundler)
-// This ensures side-effects (like DB connections or timers) only run within a request context
-let agenticTrustModuleCache: any = null;
-
-const getAgenticTrustModule = async () => {
-  if (agenticTrustModuleCache) return agenticTrustModuleCache;
-  
-  try {
-    agenticTrustModuleCache = await import('@agentic-trust/core/server');
-    return agenticTrustModuleCache;
-  } catch (e) {
-    console.error('Failed to import @agentic-trust/core/server:', e);
-    throw e;
-  }
+// NOTE: The upstream agentic-trust SDKs make the Worker bundle far too large.
+// We keep these stubs so the server compiles; related skills will return errors.
+const getAgenticTrustClient = async (): Promise<any> => {
+  throw new Error("Agentic Trust SDK is disabled in the full-Worker build (size limits).");
 };
-
-const getAgenticTrustClient = async () => {
-  const mod = await getAgenticTrustModule();
-  return mod.getAgenticTrustClient();
+const processValidationRequests = async (): Promise<any[]> => {
+  throw new Error("Validation processing is disabled in the full-Worker build (size limits).");
 };
-
-const loadSessionPackage = async (path: string): Promise<SessionPackage> => {
-  try {
-    const mod = await getAgenticTrustModule();
-    return mod.loadSessionPackage(path);
-  } catch (error) {
-    console.error('[loadSessionPackage] Failed to load:', error);
-    throw error;
-  }
-};
-
-/**
- * Process validation requests using session package
- */
-const processValidationRequests = async (
-  sessionPackage: SessionPackage,
-  chainId: number = 11155111, // DEFAULT_CHAIN_ID
-  agentIdFilter?: string,
-  requestHashFilter?: string,
-): Promise<any[]> => {
-  try {
-    const mod = await getAgenticTrustModule();
-    const processValidationRequestsWithSessionPackage = mod.processValidationRequestsWithSessionPackage;
-    
-    if (!processValidationRequestsWithSessionPackage) {
-      throw new Error('processValidationRequestsWithSessionPackage not available from @agentic-trust/core/server');
-    }
-    
-    console.log(`[IMPACT-AGENT] Processing validation requests (chainId=${chainId}, agentId=${agentIdFilter || 'ALL'}, requestHash=${requestHashFilter || 'ALL'})`);
-    
-    return await processValidationRequestsWithSessionPackage({
-      sessionPackage,
-      chainId,
-      agentIdFilter,
-      requestHashFilter,
-    });
-  } catch (error) {
-    console.error('[IMPACT-AGENT] Error processing validation requests:', error);
-    throw error;
-  }
-};
-
-/**
- * Get agent validations summary
- */
-const getAgentValidationsSummary = async (chainId: number, agentId: string): Promise<any> => {
-  try {
-    const mod = await getAgenticTrustModule();
-    const getAgentValidationsSummaryFn = mod.getAgentValidationsSummary;
-    
-    if (!getAgentValidationsSummaryFn) {
-      throw new Error('getAgentValidationsSummary not available from @agentic-trust/core/server');
-    }
-    
-    return await getAgentValidationsSummaryFn(chainId, agentId);
-  } catch (error) {
-    console.error('[IMPACT-AGENT] Error getting validation summary:', error);
-    throw error;
-  }
+const getAgentValidationsSummary = async (): Promise<any> => {
+  throw new Error("Validation summary is disabled in the full-Worker build (size limits).");
 };
 
 import { getD1Database } from './lib/d1-wrapper.js';
 import type { Organization, AgentFeedbackRequest } from './lib/db.js';
+import { parseUaidParts } from './lib/uaid.js';
 
 const DEPLOY_TIMESTAMP = new Date().toISOString();
 
@@ -391,47 +321,55 @@ app.get('/api/agent/account', async (c) => {
 
     console.log('[Agent Account] Resolving account for ENS name:', ensName);
 
-    const client = await getAgenticTrustClient();
-    const agent = await client.getAgentByName(ensName);
-
-    if (!agent) {
-      return c.json({
-        error: 'Agent not found for ENS name',
-        ensName,
-      }, 404);
+    const db = await getD1Database();
+    if (!db) {
+      return c.json(
+        {
+          error: 'D1 database not available',
+          message:
+            'Configure D1 binding or set USE_REMOTE_D1=true with Cloudflare credentials for remote access.',
+        },
+        500,
+      );
     }
 
-    const agentAccount =
-      (agent as any).agentAccount ||
-      (agent as any).account ||
-      (agent as any).agentAddress ||
-      (agent as any).address;
-    const agentId = (agent as any).agentId;
-    const chainId = (agent as any).chainId;
+    const org = await db
+      .prepare('SELECT uaid, session_package, agent_card_json FROM organizations WHERE ens_name = ?')
+      .bind(ensName)
+      .first<{ uaid: string | null; session_package: string | null; agent_card_json?: string | null }>();
 
-    console.log('[Agent Account] Resolved:', {
-      ensName,
-      agentId,
-      agentAccount,
-      chainId,
-      agentKeys: Object.keys(agent),
-    });
+    if (!org) {
+      return c.json({ error: 'Organization not found for ENS name', ensName }, 404);
+    }
 
-    if (!agentAccount) {
-      return c.json({
-        error: 'Agent account address not found',
-        ensName,
-        agentId,
-        message:
-          'The agent exists but does not have an account address. The agent may need to be registered first.',
-      }, 404);
+    const parsed = parseUaidParts(org.uaid);
+    if (!parsed?.agentAccount) {
+      return c.json({ error: 'Missing UAID/account for organization', ensName, uaid: org.uaid ?? null }, 400);
+    }
+
+    let agentId: string | undefined;
+    try {
+      const sp = org.session_package ? JSON.parse(org.session_package) : null;
+      const raw = sp?.agentId ?? null;
+      if (raw != null) agentId = typeof raw === 'bigint' ? raw.toString() : String(raw);
+    } catch {
+      // ignore
+    }
+    if (!agentId) {
+      try {
+        const card = org.agent_card_json ? JSON.parse(org.agent_card_json) : null;
+        const raw = card?.agentId ?? card?.agent?.agentId ?? card?.agentInfo?.agentId ?? null;
+        if (raw != null) agentId = String(raw);
+      } catch {
+        // ignore
+      }
     }
 
     return c.json({
       ensName,
-      agentId: agentId ? String(agentId) : undefined,
-      account: agentAccount,
-      chainId: chainId ? Number(chainId) : undefined,
+      agentId,
+      account: parsed.agentAccount,
+      chainId: parsed.chainId,
     });
   } catch (error) {
     console.error('[Agent Account] Error:', error);
@@ -449,47 +387,11 @@ app.get('/.well-known/agent-card.json', async (c) => {
   try {
     const { agentName, ensName } = c.get('domainInfo');
 
-    // Resolve agent from ENS using Agentic Trust client
+    // UAID-only: do not resolve agent via SDK here; use D1 org record (uaid/session_package/agent_card_json).
     let agentId: string | undefined;
     let agentAccount: string | undefined;
     let chainId = '11155111';
     let agentDid: string | undefined;
-
-    try {
-      const client = await getAgenticTrustClient();
-      console.log('[Agent Card] Resolving agent from ENS:', ensName);
-      const agent = await client.getAgentByName(ensName);
-
-      if (agent) {
-        console.log('[Agent Card] Agent object keys:', Object.keys(agent));
-        console.log('[Agent Card] Agent summary:', {
-          agentId: (agent as any).agentId,
-          agentAccount:
-            (agent as any).agentAccount ??
-            (agent as any).account ??
-            (agent as any).agentAddress ??
-            (agent as any).address,
-          chainId: (agent as any).chainId,
-          did: (agent as any).did,
-        });
-
-        agentId = String((agent as any).agentId || '');
-        agentAccount =
-          (agent as any).agentAccount ||
-          (agent as any).account ||
-          (agent as any).agentAddress ||
-          (agent as any).address;
-        chainId = String((agent as any).chainId || 11155111);
-        agentDid = (agent as any).did;
-
-        console.log('[Agent Card] Extracted agent info:', { agentId, agentAccount, chainId, agentDid });
-      } else {
-        console.warn('[Agent Card] Agent not found for ENS:', ensName);
-      }
-    } catch (error) {
-      console.warn('[Agent Card] Could not resolve agent from ENS, using defaults:', error);
-      console.warn('[Agent Card] Error details:', error instanceof Error ? error.stack : error);
-    }
 
     // Fetch organization + session package from D1
     let orgData: Organization | null = null;
@@ -640,6 +542,27 @@ app.get('/.well-known/agent-card.json', async (c) => {
       });
     }
 
+    // UAID-only: derive chain/account and agentId from D1 data.
+    try {
+      const parsed = parseUaidParts(orgData?.uaid ?? null);
+      if (parsed?.chainId) chainId = String(parsed.chainId);
+      if (parsed?.agentAccount) agentAccount = parsed.agentAccount;
+      if (!agentId && sessionPackageFromDb?.agentId != null) {
+        const raw = sessionPackageFromDb.agentId;
+        agentId = typeof raw === 'bigint' ? raw.toString() : String(raw);
+      }
+      if (!agentId && typeof orgData?.agent_card_json === 'string' && orgData.agent_card_json.trim()) {
+        const card = JSON.parse(orgData.agent_card_json);
+        const raw = card?.agentId ?? card?.agent?.agentId ?? card?.agentInfo?.agentId ?? null;
+        if (raw != null) agentId = String(raw);
+      }
+      if (agentAccount && chainId) {
+        agentDid = `did:ethr:${chainId}:${agentAccount}`;
+      }
+    } catch {
+      // ignore
+    }
+
     let agentCard: any;
     if (sessionPackageFromDb) {
       agentCard = generateAgentCardFromSessionPackage(sessionPackageFromDb as SessionPackage, {
@@ -673,7 +596,7 @@ app.get('/.well-known/agent-card.json', async (c) => {
         ensName: ensName,
         agentId,
         chainId: chainId ? Number(chainId) : undefined,
-        agentAccount: agentAccount || orgData.agent_account,
+        agentAccount: agentAccount,
         did: agentDid,
       } as any;
     } else {
@@ -772,43 +695,39 @@ async function handleA2aRequest(c: any) {
 
     const { agentName, ensName } = c.get('domainInfo');
 
-    // Resolve agent from ENS
+    // Resolve agent info (UAID-only) from D1 organizations table.
     let agentId: string | undefined;
     let agentAccount: string | undefined;
     let chainId = '11155111';
-
     try {
-      const client = await getAgenticTrustClient();
-      console.log('[IMPACT-AGENT] Resolving agent from ENS:', ensName);
-      const agent = await client.getAgentByName(ensName);
-
-      if (agent) {
-        console.log('[IMPACT-AGENT] Agent object keys:', Object.keys(agent));
-        console.log('[IMPACT-AGENT] Agent summary:', {
-          agentId: (agent as any).agentId,
-          agentAccount:
-            (agent as any).agentAccount ??
-            (agent as any).account ??
-            (agent as any).agentAddress ??
-            (agent as any).address,
-          chainId: (agent as any).chainId,
-        });
-
-        agentId = String((agent as any).agentId || '');
-        agentAccount =
-          (agent as any).agentAccount ||
-          (agent as any).account ||
-          (agent as any).agentAddress ||
-          (agent as any).address;
-        chainId = String((agent as any).chainId || 11155111);
-
-        console.log('[IMPACT-AGENT] Extracted agent info:', { agentId, agentAccount, chainId });
-      } else {
-        console.warn('[IMPACT-AGENT] Agent not found for ENS:', ensName);
+      const db = await getD1Database();
+      if (db && ensName) {
+        const org = await db
+          .prepare('SELECT uaid, session_package, agent_card_json FROM organizations WHERE ens_name = ?')
+          .bind(ensName)
+          .first<{ uaid: string | null; session_package: string | null; agent_card_json?: string | null }>();
+        const parsed = parseUaidParts(org?.uaid ?? null);
+        if (parsed?.agentAccount) agentAccount = parsed.agentAccount;
+        if (parsed?.chainId) chainId = String(parsed.chainId);
+        try {
+          const sp = org?.session_package ? JSON.parse(org.session_package) : null;
+          const raw = sp?.agentId ?? null;
+          if (raw != null) agentId = typeof raw === 'bigint' ? raw.toString() : String(raw);
+        } catch {
+          // ignore
+        }
+        if (!agentId) {
+          try {
+            const card = org?.agent_card_json ? JSON.parse(org.agent_card_json) : null;
+            const raw = card?.agentId ?? card?.agent?.agentId ?? card?.agentInfo?.agentId ?? null;
+            if (raw != null) agentId = String(raw);
+          } catch {
+            // ignore
+          }
+        }
       }
-    } catch (error) {
-      console.warn('[IMPACT-AGENT] Could not resolve agent from ENS, using defaults:', error);
-      console.warn('[IMPACT-AGENT] Error details:', error instanceof Error ? error.stack : error);
+    } catch {
+      // ignore
     }
 
     console.log('[IMPACT-AGENT] Processing A2A for agent:', { agentName, ensName, agentId, agentAccount });
@@ -823,31 +742,9 @@ async function handleA2aRequest(c: any) {
       );
     }
 
-    // Verify authentication if provided
-    const authenticatedClientAddress: string | null = null;
-    if (auth) {
-      const atClient = await getAgenticTrustClient();
-      const url = new URL(c.req.url);
-      const providerUrl = process.env.PROVIDER_BASE_URL || `${url.protocol}//${url.host}`;
-
-      //const verification = await verifyChallenge(atClient as any, auth, providerUrl);
-      //if (!verification.valid) {
-      //  return c.json({
-      //    success: false,
-      //    error: `Authentication failed: ${verification.error}`,
-      //  }, 401);
-      //}
-
-      //authenticatedClientAddress = auth.ethereumAddress || null;
-      //console.log('[IMPACT-AGENT] Client authenticated:', {
-      //  did: auth.did,
-      //  kid: auth.kid,
-      //  algorithm: auth.algorithm,
-      //  clientAddress: authenticatedClientAddress,
-      //});
-    } else {
-      console.warn('[IMPACT-AGENT] A2A request received without authentication');
-    }
+    // Auth challenges are currently treated as optional metadata in this Worker build.
+    // (Full challenge verification requires heavier dependencies than fit the Worker size limit.)
+    if (!auth) console.warn('[IMPACT-AGENT] A2A request received without authentication');
 
     console.log('[IMPACT-AGENT] Received A2A message:', {
       fromAgentId,
