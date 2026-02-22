@@ -113,6 +113,7 @@ export default function ApplicationEnvironmentPage() {
   }, [initiativeIdParam]);
 
   const [orgs, setOrgs] = React.useState<OrganizationAssociation[] | null>(null);
+  const [coalitionOrgOptions, setCoalitionOrgOptions] = React.useState<OrganizationAssociation[] | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -125,6 +126,26 @@ export default function ApplicationEnvironmentPage() {
     const n = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
     return Number.isFinite(n) && n > 0 ? n : null;
   }, [profile]);
+
+  // Fetch coalition org options globally (not limited to current user's associations).
+  React.useEffect(() => {
+    if (!isConnected) {
+      setCoalitionOrgOptions(null);
+      return;
+    }
+    const ac = new AbortController();
+    (async () => {
+      try {
+        const resp = await fetch("/api/organizations/coalitions", { signal: ac.signal });
+        const data = resp.ok ? await resp.json().catch(() => null) : null;
+        const list = Array.isArray(data?.organizations) ? (data.organizations as OrganizationAssociation[]) : [];
+        if (!ac.signal.aborted) setCoalitionOrgOptions(list);
+      } catch (e: any) {
+        if (!ac.signal.aborted) setCoalitionOrgOptions([]);
+      }
+    })();
+    return () => ac.abort();
+  }, [isConnected]);
 
   // Fetch organizations by individualId only (after profile is loaded).
   const orgFetchKeyRef = React.useRef<string | null>(null); // last successful key
@@ -392,12 +413,13 @@ export default function ApplicationEnvironmentPage() {
 
   function ProposedInitiativesView() {
     const coalitionOrgs = React.useMemo(() => {
+      const fromApi = Array.isArray(coalitionOrgOptions) ? coalitionOrgOptions : null;
+      if (fromApi && fromApi.length) return fromApi;
       return (orgs || []).filter((o: any) => {
         const roles = Array.isArray((o as any).org_roles) ? (o as any).org_roles : [];
-        if (roles.includes("coalition")) return true;
-        return false;
+        return roles.includes("coalition");
       });
-    }, [orgs]);
+    }, [orgs, coalitionOrgOptions]);
 
     const defaultCoalitionOrgId = React.useMemo(() => {
       const id = typeof primaryOrg?.id === "number" ? primaryOrg.id : null;
@@ -539,6 +561,8 @@ export default function ApplicationEnvironmentPage() {
     const [state, setState] = React.useState<InitiativeState>("draft");
     const [includePrimaryOrg, setIncludePrimaryOrg] = React.useState(true);
     const coalitionOrgs = React.useMemo(() => {
+      const fromApi = Array.isArray(coalitionOrgOptions) ? coalitionOrgOptions : null;
+      if (fromApi && fromApi.length) return fromApi;
       return (orgs || []).filter((o: any) => {
         const roles = Array.isArray((o as any).org_roles) ? (o as any).org_roles : [];
         const normalized = roles
@@ -547,7 +571,7 @@ export default function ApplicationEnvironmentPage() {
         if (normalized.includes("coalition")) return true;
         return false;
       });
-    }, [orgs]);
+    }, [orgs, coalitionOrgOptions]);
     const [coalitionOrgIds, setCoalitionOrgIds] = React.useState<number[]>([]);
     const [refreshingOrgs, setRefreshingOrgs] = React.useState(false);
     const [submitting, setSubmitting] = React.useState(false);
@@ -634,6 +658,10 @@ export default function ApplicationEnvironmentPage() {
                             setRefreshingOrgs(true);
                             const orgList = await getUserOrganizationsByIndividualId(individualId);
                             setOrgs(orgList);
+                            const cResp = await fetch("/api/organizations/coalitions");
+                            const cData = cResp.ok ? await cResp.json().catch(() => null) : null;
+                            const cList = Array.isArray(cData?.organizations) ? (cData.organizations as OrganizationAssociation[]) : [];
+                            setCoalitionOrgOptions(cList);
                           } finally {
                             setRefreshingOrgs(false);
                           }
