@@ -107,7 +107,7 @@ export function AppShell(props: {
   }, [sections, role]);
 
   const sidebar = (
-    <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <Box sx={{ display: "flex", flexDirection: "column" }}>
       <Box sx={{ px: 2.25, pt: 2.25, pb: 2 }}>
         <Typography sx={{ fontSize: 12, letterSpacing: "0.06em", fontWeight: 800, textTransform: "uppercase" }}>
           Impact Trust Graph
@@ -118,7 +118,7 @@ export function AppShell(props: {
       </Box>
       <Divider />
 
-      <Box sx={{ flex: 1, overflowY: "auto", py: 1 }}>
+      <Box sx={{ py: 1 }}>
         {filteredSections.map((section) => (
           <List
             key={section.id}
