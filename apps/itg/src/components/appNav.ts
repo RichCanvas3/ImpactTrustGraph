@@ -66,6 +66,7 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
       { id: "system-settings", label: "⚙️ System Settings", roles: ["admin"] },
       { id: "user-management", label: "👥 User Management", roles: ["admin"] },
       { id: "protocol-config", label: "📡 Protocol Config", roles: ["admin"] },
+      { id: "admin-capabilities", label: "🧩 Capabilities", roles: ["admin"], href: "/admin/capabilities" },
       { id: "agent-approvals", label: "✋ Agent Approvals", roles: ["admin", "coordinator"] },
       { id: "audit-log", label: "🔍 Audit Log", roles: ["admin"] },
     ],
@@ -94,6 +95,7 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
     label: "User Tools",
     items: [
       { id: "user-settings", label: "⚙️ User Settings", href: "/user-settings" },
+      { id: "user-capabilities", label: "🧩 Capabilities", href: "/user-capabilities" },
       { id: "user-tools", label: "🧰 User Tools", href: "/user-tools" },
     ],
   },

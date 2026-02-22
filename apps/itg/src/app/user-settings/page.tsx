@@ -25,8 +25,9 @@ import { useCurrentUserProfile } from "../../components/useCurrentUserProfile";
 import { useWeb3Auth } from "../../components/Web3AuthProvider";
 import { saveUserProfile } from "../service/userProfileService";
 import { parseUaidParts } from "../../lib/uaid";
+import { UserCapabilitiesEditor } from "../../components/UserCapabilitiesEditor";
 
-type UserSettingsTab = "user" | "agent";
+type UserSettingsTab = "user" | "capabilities" | "agent";
 
 function safeParseJson(input: string | null | undefined): any | null {
   if (!input) return null;
@@ -435,6 +436,7 @@ export default function UserSettingsPage() {
             <CardContent sx={{ pb: 0 }}>
               <Tabs value={tab} onChange={(_, v) => setTab(v as UserSettingsTab)} sx={{ mb: 1 }}>
                 <Tab value="user" label="User" />
+                <Tab value="capabilities" label="Capabilities" />
                 <Tab value="agent" label="Agent" sx={{ ml: "auto" }} />
               </Tabs>
             </CardContent>
@@ -474,6 +476,8 @@ export default function UserSettingsPage() {
                     </Button>
                   </Stack>
                 </Stack>
+              ) : tab === "capabilities" ? (
+                <UserCapabilitiesEditor individualId={individualId} role={role} />
               ) : (
                 <Stack spacing={2}>
                   <Typography sx={{ fontWeight: 800 }}>Agent</Typography>

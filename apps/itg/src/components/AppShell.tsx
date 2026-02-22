@@ -24,6 +24,8 @@ export type AppViewId =
   | "agent-registry"
   | "user-tools"
   | "user-settings"
+  | "user-capabilities"
+  | "admin-capabilities"
   | "coordination-hub"
   | "trust-trail"
   | "opportunities"
