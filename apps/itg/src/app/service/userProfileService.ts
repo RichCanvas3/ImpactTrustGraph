@@ -55,6 +55,9 @@ export interface OrganizationAssociation {
 export async function saveUserProfile(profile: UserProfile): Promise<UserProfile> {
   // Convert null to undefined for API compatibility
   const cleanedProfile = {
+    ...(typeof profile.id === "number" && Number.isFinite(profile.id) && profile.id > 0
+      ? { individual_id: profile.id }
+      : {}),
     ...(profile.email ? { email: profile.email } : {}),
     role: profile.role ?? undefined,
     first_name: profile.first_name ?? undefined,
@@ -217,6 +220,38 @@ export async function upsertUserOrganizationByIndividualId(input: {
   is_primary?: boolean;
   role?: string | null;
 }): Promise<void> {
+  if (!input.uaid || typeof input.uaid !== "string" || !input.uaid.trim()) {
+    throw new Error("Missing uaid for organization agent (UAID is the canonical identifier).");
+  }
+  const response = await fetch('/api/users/organizations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || error.error || 'Failed to upsert organization association');
+  }
+}
+
+/** UAID-only association path (no EOA/email required). */
+export async function upsertUserOrganizationByIndividualUaid(input: {
+  individual_uaid: string;
+  ens_name: string;
+  agent_name: string;
+  org_name?: string | null;
+  org_address?: string | null;
+  org_roles?: string[] | null;
+  email_domain?: string | null;
+  uaid: string;
+  session_package?: string | null;
+  org_metadata?: string | null;
+  is_primary?: boolean;
+  role?: string | null;
+}): Promise<void> {
+  if (!input.individual_uaid || typeof input.individual_uaid !== "string" || !input.individual_uaid.trim()) {
+    throw new Error("Missing individual_uaid (participant UAID) for organization association.");
+  }
   if (!input.uaid || typeof input.uaid !== "string" || !input.uaid.trim()) {
     throw new Error("Missing uaid for organization agent (UAID is the canonical identifier).");
   }

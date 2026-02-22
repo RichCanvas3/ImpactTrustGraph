@@ -95,6 +95,9 @@ export function SiteHeader() {
     () => user?.name || user?.email || walletAddress || "Account",
     [user?.name, user?.email, walletAddress]
   );
+  const isOnboarded = React.useMemo(() => {
+    return typeof (profile as any)?.participant_uaid === "string" && !!String((profile as any).participant_uaid).trim();
+  }, [profile]);
   const accountInitial = accountDisplayName ? accountDisplayName[0]?.toUpperCase() ?? "A" : "A";
   const menuItems = React.useMemo(
     () => [
@@ -106,6 +109,11 @@ export function SiteHeader() {
     ],
     []
   );
+  const visibleMenuItems = React.useMemo(() => {
+    if (!user) return menuItems;
+    if (!isOnboarded) return [];
+    return menuItems;
+  }, [user, isOnboarded, menuItems]);
 
   const handleDisconnect = React.useCallback(async () => {
     try {
@@ -395,12 +403,20 @@ export function SiteHeader() {
                 transformOrigin={{ vertical: "top", horizontal: "right" }}
                 PaperProps={{ sx: { mt: 1, minWidth: 260 } }}
               >
-                {menuItems.map((item) => (
+                {visibleMenuItems.map((item) => (
                   <MenuItem key={item.path} onClick={() => handleNavigate(item.path)} sx={{ py: 1 }}>
                     <ListItemIcon sx={{ minWidth: 32 }}>{item.icon}</ListItemIcon>
                     <Typography variant="body2">{item.label}</Typography>
                   </MenuItem>
                 ))}
+                {!isOnboarded ? (
+                  <MenuItem onClick={() => handleNavigate("/onboarding")} sx={{ py: 1 }}>
+                    <ListItemIcon sx={{ minWidth: 32 }}>
+                      <WorkOutlineIcon fontSize="small" />
+                    </ListItemIcon>
+                    <Typography variant="body2">Continue onboarding</Typography>
+                  </MenuItem>
+                ) : null}
                 <MenuItem onClick={() => handleNavigate("/onboarding")} sx={{ py: 1 }}>
                   <ListItemIcon sx={{ minWidth: 32 }}>
                     <WorkOutlineIcon fontSize="small" />

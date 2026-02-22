@@ -261,6 +261,8 @@ export async function POST(request: NextRequest) {
       hasAa: !!body.aa_address
     });
     const {
+      individualId,
+      individual_id,
       email,
       role,
       first_name,
@@ -278,14 +280,28 @@ export async function POST(request: NextRequest) {
       trust_tier,
     } = body;
 
+    const individualIdFromBody =
+      (typeof individualId === "number" && Number.isFinite(individualId) && individualId > 0
+        ? individualId
+        : typeof individualId === "string" && /^\d+$/.test(individualId.trim())
+          ? Number.parseInt(individualId.trim(), 10)
+          : typeof individual_id === "number" && Number.isFinite(individual_id) && individual_id > 0
+            ? individual_id
+            : typeof individual_id === "string" && /^\d+$/.test(individual_id.trim())
+              ? Number.parseInt(individual_id.trim(), 10)
+              : null);
+
     const cleanedEmail =
       typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
     const cleanedEoa =
       typeof eoa_address === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa_address) ? eoa_address.toLowerCase() : null;
+    const cleanedParticipantUaid = canonicalizeUaid(
+      typeof participant_uaid === "string" ? participant_uaid.trim() : null,
+    );
 
-    if (!cleanedEoa && !cleanedEmail) {
+    if (!individualIdFromBody && !cleanedEoa && !cleanedEmail && !cleanedParticipantUaid) {
       return NextResponse.json(
-        { error: 'Either eoa_address (preferred) or a real email is required' },
+        { error: 'One of individual_id, eoa_address, email, or participant_uaid is required' },
         { status: 400 },
       );
     }
@@ -312,16 +328,38 @@ export async function POST(request: NextRequest) {
     await ensureAgentsSchema(db);
     await ensureIndividualsSchema(db);
 
-    // Check if profile exists
-    const existing = cleanedEoa
+    // Check if profile exists.
+    // UAID is the canonical identifier; prefer it when present to avoid duplicate individuals.
+    const existingById = individualIdFromBody
       ? await db
-          .prepare('SELECT id FROM individuals WHERE eoa_address = ?')
+          .prepare('SELECT id FROM individuals WHERE id = ?')
+          .bind(individualIdFromBody)
+          .first<{ id: number }>()
+      : null;
+
+    const existingByUaid = !existingById?.id && cleanedParticipantUaid
+      ? await db
+          .prepare('SELECT id FROM individuals WHERE participant_uaid = ?')
+          .bind(cleanedParticipantUaid)
+          .first<{ id: number }>()
+      : null;
+
+    const existingByEoa = !existingById?.id && !existingByUaid?.id && cleanedEoa
+      ? await db
+          .prepare('SELECT id FROM individuals WHERE lower(eoa_address) = ?')
           .bind(cleanedEoa)
           .first<{ id: number }>()
-      : await db
+      : null;
+
+    const existingByEmail = !existingById?.id && !existingByUaid?.id && !existingByEoa?.id && cleanedEmail
+      ? await db
           .prepare('SELECT id FROM individuals WHERE email = ?')
           .bind(cleanedEmail)
-          .first<{ id: number }>();
+          .first<{ id: number }>()
+      : null;
+
+    const existing =
+      existingById?.id ? existingById : existingByUaid?.id ? existingByUaid : existingByEoa?.id ? existingByEoa : existingByEmail;
 
     // Email can be absent (phone logins) or may conflict with an existing record.
     // If the provided email is already used by another individual, do NOT write it
@@ -422,12 +460,15 @@ export async function POST(request: NextRequest) {
     if (existing) {
       // Update existing profile
       console.log('[users/profile] Updating existing profile');
+      const cleanedFirst = typeof first_name === "string" ? first_name.trim() : "";
+      const cleanedLast = typeof last_name === "string" ? last_name.trim() : "";
+      const cleanedRole = typeof role === "string" ? role.trim() : "";
       const updateResult = await db.prepare(
         `UPDATE individuals 
          SET email = COALESCE(?, email),
-             role = COALESCE(?, role),
-             first_name = COALESCE(?, first_name),
-             last_name = COALESCE(?, last_name),
+             role = CASE WHEN ? IS NOT NULL AND trim(?) != '' THEN ? ELSE role END,
+             first_name = CASE WHEN ? IS NOT NULL AND trim(?) != '' THEN ? ELSE first_name END,
+             last_name = CASE WHEN ? IS NOT NULL AND trim(?) != '' THEN ? ELSE last_name END,
              phone_number = COALESCE(?, phone_number),
              social_display_name = COALESCE(?, social_display_name),
              social_account_id = COALESCE(?, social_account_id),
@@ -436,7 +477,7 @@ export async function POST(request: NextRequest) {
              aa_address = COALESCE(?, aa_address),
              participant_ens_name = COALESCE(?, participant_ens_name),
              participant_agent_name = COALESCE(?, participant_agent_name),
-             participant_uaid = COALESCE(?, participant_uaid),
+             participant_uaid = CASE WHEN ? IS NOT NULL AND trim(?) != '' THEN ? ELSE participant_uaid END,
              participant_agent_row_id = COALESCE(?, participant_agent_row_id),
              participant_metadata = COALESCE(?, participant_metadata),
              trust_tier = COALESCE(?, trust_tier),
@@ -444,9 +485,9 @@ export async function POST(request: NextRequest) {
          WHERE id = ?`
       ).bind(
         effectiveEmail,
-        typeof role === "string" ? role : null,
-        typeof first_name === "string" ? first_name : null,
-        typeof last_name === "string" ? last_name : null,
+        cleanedRole || null, cleanedRole || null, cleanedRole || null,
+        cleanedFirst || null, cleanedFirst || null, cleanedFirst || null,
+        cleanedLast || null, cleanedLast || null, cleanedLast || null,
         typeof phone_number === "string" ? phone_number : null,
         typeof social_display_name === "string" ? social_display_name : null,
         typeof social_account_id === "string" ? social_account_id : null,
@@ -455,7 +496,7 @@ export async function POST(request: NextRequest) {
         typeof aa_address === "string" ? aa_address : null,
         typeof participant_ens_name === "string" ? participant_ens_name : null,
         typeof participant_agent_name === "string" ? participant_agent_name : null,
-        canonicalizeUaid(typeof participant_uaid === "string" ? participant_uaid.trim() : null),
+        cleanedParticipantUaid, cleanedParticipantUaid, cleanedParticipantUaid,
         participantAgentRowId,
         typeof participant_metadata === "string" ? participant_metadata : null,
         typeof trust_tier === "string" ? trust_tier : null,
@@ -466,6 +507,9 @@ export async function POST(request: NextRequest) {
     } else {
       // Create new profile
       console.log('[users/profile] Creating new profile');
+      const cleanedFirst = typeof first_name === "string" ? first_name.trim() : "";
+      const cleanedLast = typeof last_name === "string" ? last_name.trim() : "";
+      const cleanedRole = typeof role === "string" ? role.trim() : "";
       const insertResult = await db.prepare(
         `INSERT INTO individuals 
          (email, role, first_name, last_name, phone_number, social_display_name, social_account_id, social_account_type, 
@@ -476,9 +520,9 @@ export async function POST(request: NextRequest) {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         effectiveEmail,
-        typeof role === "string" ? role : null,
-        first_name || null,
-        last_name || null,
+        cleanedRole || null,
+        cleanedFirst || null,
+        cleanedLast || null,
         phone_number || null,
         social_display_name || null,
         social_account_id || null,
@@ -487,7 +531,7 @@ export async function POST(request: NextRequest) {
         aa_address || null,
         participant_ens_name || null,
         participant_agent_name || null,
-        canonicalizeUaid(typeof participant_uaid === "string" ? participant_uaid.trim() : null),
+        cleanedParticipantUaid,
         participantAgentRowId,
         typeof participant_metadata === "string" ? participant_metadata : null,
         typeof trust_tier === "string" ? trust_tier : null,

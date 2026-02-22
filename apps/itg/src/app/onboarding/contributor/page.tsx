@@ -7,6 +7,11 @@ export default function ContributorOnboardingEntry() {
   const router = useRouter();
 
   React.useEffect(() => {
+    try {
+      sessionStorage.setItem("itg_onboarding_requested_role", "contributor");
+    } catch {
+      // ignore
+    }
     router.replace("/onboarding?role=contributor");
   }, [router]);
 

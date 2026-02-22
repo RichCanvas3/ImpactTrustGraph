@@ -7,6 +7,11 @@ export default function OrgAdminOnboardingEntry() {
   const router = useRouter();
 
   React.useEffect(() => {
+    try {
+      sessionStorage.setItem("itg_onboarding_requested_role", "org-admin");
+    } catch {
+      // ignore
+    }
     router.replace("/onboarding?role=org-admin");
   }, [router]);
 

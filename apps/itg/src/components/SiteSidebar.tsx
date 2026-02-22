@@ -45,7 +45,7 @@ export function SiteSidebar(props: { role: AppRole | null }) {
   };
 
   return (
-    <Box sx={{ height: "100%", bgcolor: SIDEBAR_BG, color: "white", display: "flex", flexDirection: "column" }}>
+    <Box sx={{ bgcolor: SIDEBAR_BG, color: "white", minHeight: "100%", display: "flex", flexDirection: "column" }}>
       <Box sx={{ px: 2.5, pt: 2.5, pb: 2 }}>
         <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.08em" }}>
           🔐 AGENTIC TRUST
@@ -53,7 +53,7 @@ export function SiteSidebar(props: { role: AppRole | null }) {
       </Box>
       <Divider sx={{ borderColor: "rgba(255,255,255,0.15)" }} />
 
-      <Box sx={{ flex: 1, overflowY: "auto", py: 1 }}>
+      <Box sx={{ py: 1, flex: 1 }}>
         <List
           dense
           subheader={
@@ -142,9 +142,11 @@ export function SiteSidebar(props: { role: AppRole | null }) {
         ) : null}
       </Box>
 
-      <Divider sx={{ borderColor: "rgba(255,255,255,0.15)" }} />
-      <Box sx={{ px: 2.5, py: 1.5, fontSize: 12, color: "rgba(255,255,255,0.55)" }}>
-        ETHDenver 2026 BUIDLathon
+      <Box sx={{ mt: "auto" }}>
+        <Divider sx={{ borderColor: "rgba(255,255,255,0.15)" }} />
+        <Box sx={{ px: 2.5, py: 1.5, fontSize: 12, color: "rgba(255,255,255,0.55)" }}>
+          ETHDenver 2026 BUIDLathon
+        </Box>
       </Box>
     </Box>
   );

@@ -250,6 +250,8 @@ export async function POST(request: NextRequest) {
     const {
       individualId,
       individual_id,
+      individual_uaid,
+      participant_uaid,
       email,
       eoa_address,
       ens_name,
@@ -280,12 +282,25 @@ export async function POST(request: NextRequest) {
       typeof email === "string" && email && email !== "unknown@example.com" ? email : null;
     const cleanedEoa =
       typeof eoa_address === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa_address) ? eoa_address : null;
+    const individualUaidValue =
+      typeof individual_uaid === "string" && individual_uaid.trim()
+        ? individual_uaid.trim()
+        : typeof participant_uaid === "string" && participant_uaid.trim()
+          ? participant_uaid.trim()
+          : null;
+    const individualUaidCanonical = canonicalizeUaid(individualUaidValue);
     const uaidValue = typeof uaid === "string" && uaid.trim() ? uaid.trim() : null;
     const uaidCanonical = canonicalizeUaid(uaidValue);
 
-    if (!individualIdFromBody || !ens_name || !agent_name || !uaidValue || !uaidCanonical) {
+    if (
+      !(individualIdFromBody || individualUaidCanonical || cleanedEoa || cleanedEmail) ||
+      !ens_name ||
+      !agent_name ||
+      !uaidValue ||
+      !uaidCanonical
+    ) {
       return NextResponse.json(
-        { error: 'Missing required fields: (individualId), ens_name, agent_name, uaid' },
+        { error: 'Missing required fields: one of (individualId|individual_uaid|email|eoa_address), plus ens_name, agent_name, uaid' },
         { status: 400 }
       );
     }
@@ -326,6 +341,22 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Invalid individualId (individual not found)" }, { status: 400 });
       }
       individual = { id: row.id };
+    } else if (individualUaidCanonical) {
+      const row = await db
+        .prepare("SELECT id FROM individuals WHERE participant_uaid = ?")
+        .bind(individualUaidCanonical)
+        .first<{ id: number }>();
+      if (row?.id) {
+        individual = { id: row.id };
+      } else {
+        // UAID-only onboarding path: create the individual stub if missing.
+        const now = Math.floor(Date.now() / 1000);
+        const insertResult = await db
+          .prepare("INSERT INTO individuals (participant_uaid, created_at, updated_at) VALUES (?, ?, ?)")
+          .bind(individualUaidCanonical, now, now)
+          .run();
+        individual = { id: Number(insertResult.meta.last_row_id) };
+      }
     } else {
       // Legacy path: resolve by eoa/email (may create the individual if missing)
       individual = cleanedEoa

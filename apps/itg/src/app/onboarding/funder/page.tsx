@@ -7,6 +7,11 @@ export default function FunderOnboardingEntry() {
   const router = useRouter();
 
   React.useEffect(() => {
+    try {
+      sessionStorage.setItem("itg_onboarding_requested_role", "funder");
+    } catch {
+      // ignore
+    }
     router.replace("/onboarding?role=funder");
   }, [router]);
 

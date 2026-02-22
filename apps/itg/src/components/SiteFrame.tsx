@@ -17,18 +17,17 @@ export function SiteFrame({ children }: { children: React.ReactNode }) {
   return (
     <Box
       sx={{
-        height: "100vh",
-        width: "100vw",
-        overflow: "hidden",
+        minHeight: "100vh",
+        width: "100%",
         display: "grid",
         gridTemplateColumns: { xs: "1fr", md: `${SIDEBAR_WIDTH}px 1fr` },
-        gridTemplateRows: `${HEADER_HEIGHT}px 1fr`,
+        gridTemplateRows: `${HEADER_HEIGHT}px auto`,
         bgcolor: "background.default",
       }}
     >
       {/* Sidebar spans both rows (mockup layout) */}
       {mdUp ? (
-        <Box sx={{ gridColumn: 1, gridRow: "1 / -1" }}>
+        <Box sx={{ gridColumn: 1, gridRow: "1 / -1", minHeight: "100vh" }}>
           <SiteSidebar role={role} />
         </Box>
       ) : null}
@@ -54,7 +53,6 @@ export function SiteFrame({ children }: { children: React.ReactNode }) {
         sx={{
           gridColumn: { xs: "1", md: "2" },
           gridRow: "2",
-          overflowY: "auto",
           bgcolor: "background.default",
         }}
       >

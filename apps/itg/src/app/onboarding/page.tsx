@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useConnection } from "../../components/connection-context";
 import { useWeb3Auth } from "../../components/Web3AuthProvider";
 import { useStandardConnect } from "../../components/useStandardConnect";
+import { canonicalizeUaid } from "../../lib/uaid";
 
 import {
   createAgentWithWallet,
@@ -20,8 +21,7 @@ import {
 } from "../service/attestationService";
 import {
   saveUserProfile,
-  associateUserWithOrganization,
-  associateUserWithOrganizationByEoa,
+  upsertUserOrganizationByIndividualUaid,
   getUserProfile,
   getUserOrganizations,
   type OrganizationAssociation,
@@ -66,8 +66,12 @@ export default function OnboardingPage() {
   const [aaAddress, setAaAddress] = React.useState<string | null>(null);
   const [firstName, setFirstName] = React.useState<string>("");
   const [lastName, setLastName] = React.useState<string>("");
+  const [isSavingStep2, setIsSavingStep2] = React.useState(false);
   const [existingIndividualProfile, setExistingIndividualProfile] = React.useState<UserProfile | null>(null);
   const [isCreatingItg, setIsCreatingItg] = React.useState(false);
+  const [orgCreateStartedAtMs, setOrgCreateStartedAtMs] = React.useState<number | null>(null);
+  const [orgCreateProgress, setOrgCreateProgress] = React.useState(0);
+  const [orgCreateStatus, setOrgCreateStatus] = React.useState<string>("");
   const [error, setError] = React.useState<string | null>(null);
 
   const urlRole = React.useMemo<StakeholderRole | null>(() => {
@@ -81,8 +85,44 @@ export default function OnboardingPage() {
     return null;
   }, [searchParams]);
 
+  // Persist the requested onboarding role so it doesn't silently fall back
+  // to stale DB role values when navigating to /onboarding without params.
+  const [stickyRequestedRole, setStickyRequestedRole] = React.useState<StakeholderRole | null>(null);
+  React.useEffect(() => {
+    if (!urlRole) return;
+    setStickyRequestedRole(urlRole);
+    try {
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("itg_onboarding_requested_role", urlRole);
+      }
+    } catch {
+      // ignore
+    }
+  }, [urlRole]);
+
+  React.useEffect(() => {
+    if (stickyRequestedRole) return;
+    try {
+      if (typeof window !== "undefined") {
+        const raw = sessionStorage.getItem("itg_onboarding_requested_role");
+        if (
+          raw === "coordinator" ||
+          raw === "contributor" ||
+          raw === "org-admin" ||
+          raw === "funder" ||
+          raw === "admin"
+        ) {
+          setStickyRequestedRole(raw);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [stickyRequestedRole]);
+
   const effectiveRole: StakeholderRole = React.useMemo(() => {
     if (urlRole) return urlRole;
+    if (stickyRequestedRole) return stickyRequestedRole;
     const profRoleRaw = typeof existingIndividualProfile?.role === "string" ? existingIndividualProfile.role : "";
     const profRole = profRoleRaw.trim().toLowerCase();
     if (profRole === "coordinator") return "coordinator";
@@ -91,7 +131,7 @@ export default function OnboardingPage() {
     if (profRole === "funder" || profRole === "grantmaker") return "funder";
     if (profRole === "admin" || profRole === "system-admin") return "admin";
     return "org-admin";
-  }, [urlRole, existingIndividualProfile?.role]);
+  }, [urlRole, stickyRequestedRole, existingIndividualProfile?.role]);
 
   const roleLabel = React.useMemo(() => {
     switch (effectiveRole) {
@@ -119,21 +159,25 @@ export default function OnboardingPage() {
 
   const [funderEntityName, setFunderEntityName] = React.useState<string>("");
 
-  // Role-specific organization fields (stored in organizations.org_metadata as JSON).
-  const [orgSector, setOrgSector] = React.useState<string>("");
-  const [orgPrograms, setOrgPrograms] = React.useState<string>("");
-  const [orgServiceAreas, setOrgServiceAreas] = React.useState<string>("");
-  const [orgAnnualBudget, setOrgAnnualBudget] = React.useState<string>("");
-
-  const [funderEntityType, setFunderEntityType] = React.useState<string>("");
-  const [funderFocusAreas, setFunderFocusAreas] = React.useState<string>("");
-  const [funderGeographicScope, setFunderGeographicScope] = React.useState<string>("");
-  const [funderComplianceRequirements, setFunderComplianceRequirements] = React.useState<string>("");
-
   // Helpful defaults by role.
   React.useEffect(() => {
     // org type was removed; no-op (roles are selected explicitly below).
     setOrg((prev) => prev);
+  }, [effectiveRole]);
+
+  const defaultOrgRoleForIndividual = React.useMemo<OrgRoleTag>(() => {
+    switch (effectiveRole) {
+      case "coordinator":
+        return "coalition";
+      case "contributor":
+        return "contributor";
+      case "funder":
+        return "funding";
+      case "admin":
+      case "org-admin":
+      default:
+        return "member";
+    }
   }, [effectiveRole]);
 
   // Participant agent (created for the individual onboarding)
@@ -141,11 +185,29 @@ export default function OnboardingPage() {
   const [isCreatingParticipant, setIsCreatingParticipant] = React.useState(false);
   const [participantEnsName, setParticipantEnsName] = React.useState<string | null>(null);
   const [participantUaid, setParticipantUaid] = React.useState<string | null>(null);
+  const [participantCreateStartedAtMs, setParticipantCreateStartedAtMs] = React.useState<number | null>(null);
+  const [participantCreateProgress, setParticipantCreateProgress] = React.useState(0);
+  const [participantCreateStatus, setParticipantCreateStatus] = React.useState<string>("");
   const [participantEnsAvailability, setParticipantEnsAvailability] = React.useState<{
     checking: boolean;
     available: boolean | null;
     ensName: string | null;
   }>({ checking: false, available: null, ensName: null });
+
+  React.useEffect(() => {
+    if (!isCreatingParticipant || participantCreateStartedAtMs == null) {
+      setParticipantCreateProgress(0);
+      return;
+    }
+    const DURATION_MS = 3 * 60 * 1000; // 3 minutes
+    const tick = () => {
+      const elapsed = Date.now() - participantCreateStartedAtMs;
+      setParticipantCreateProgress(Math.max(0, Math.min(1, elapsed / DURATION_MS)));
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [isCreatingParticipant, participantCreateStartedAtMs]);
 
   // Organization agent (existing flow)
   const [orgEnsAvailability, setOrgEnsAvailability] = React.useState<{
@@ -160,6 +222,28 @@ export default function OnboardingPage() {
   const [userOrganizations, setUserOrganizations] = React.useState<OrganizationAssociation[]>([]);
   const [isLoadingOrganizations, setIsLoadingOrganizations] = React.useState(false);
   const [showOrgConnectSelector, setShowOrgConnectSelector] = React.useState(false);
+
+  // Step 5: auto-set organization role based on the individual's role.
+  React.useEffect(() => {
+    if (step !== 5) return;
+    if (orgChoice !== "create") return;
+    setOrgRoles([defaultOrgRoleForIndividual]);
+  }, [step, orgChoice, defaultOrgRoleForIndividual]);
+
+  React.useEffect(() => {
+    if (!isCreatingItg || orgCreateStartedAtMs == null) {
+      setOrgCreateProgress(0);
+      return;
+    }
+    const DURATION_MS = 3 * 60 * 1000; // 3 minutes
+    const tick = () => {
+      const elapsed = Date.now() - orgCreateStartedAtMs;
+      setOrgCreateProgress(Math.max(0, Math.min(1, elapsed / DURATION_MS)));
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [isCreatingItg, orgCreateStartedAtMs]);
 
   const [orgSearchQuery, setOrgSearchQuery] = React.useState<string>("");
   const [orgSearchResults, setOrgSearchResults] = React.useState<any[]>([]);
@@ -272,42 +356,28 @@ export default function OnboardingPage() {
       // Debounce: only save after user stops typing for 500ms
       const timeoutId = setTimeout(async () => {
         try {
-          const participantMeta: Record<string, any> = {};
-          if (effectiveRole === "contributor") {
-            if (contributorSkills.trim()) participantMeta.skills = contributorSkills.trim();
-            if (contributorAvailabilityHours.trim()) {
-              const n = Number(contributorAvailabilityHours.trim());
-              participantMeta.availability_hours_per_week = Number.isFinite(n) ? n : contributorAvailabilityHours.trim();
-            }
-            if (contributorEngagementPreferences.trim()) {
-              participantMeta.engagement_preferences = contributorEngagementPreferences.trim();
-            }
-          } else if (effectiveRole === "coordinator") {
-            if (coordinatorCoalitionName.trim()) participantMeta.coalition_name = coordinatorCoalitionName.trim();
-            if (coordinatorScope.trim()) participantMeta.coordination_scope = coordinatorScope.trim();
-          } else if (effectiveRole === "funder") {
-            if (funderEntityName.trim()) participantMeta.funder_entity_name = funderEntityName.trim();
-          }
-
+          const effectiveParticipantUaid =
+            (typeof participantUaid === "string" && participantUaid.trim()
+              ? participantUaid.trim()
+              : typeof (existingIndividualProfile as any)?.participant_uaid === "string" && String((existingIndividualProfile as any).participant_uaid).trim()
+                ? String((existingIndividualProfile as any).participant_uaid).trim()
+                : null);
           const payload: UserProfile = {
+            ...(typeof (existingIndividualProfile as any)?.id === "number" &&
+            Number.isFinite((existingIndividualProfile as any).id) &&
+            (existingIndividualProfile as any).id > 0
+              ? { id: (existingIndividualProfile as any).id }
+              : {}),
             ...(userEmail ? { email: userEmail } : {}),
             role: effectiveRole,
             first_name: firstName || null,
             last_name: lastName || null,
             eoa_address: walletAddress || null,
             aa_address: aaAddress || null,
-            ...(Object.keys(participantMeta).length > 0
-              ? { participant_metadata: JSON.stringify(participantMeta) }
-              : {}),
+            ...(effectiveParticipantUaid ? { participant_uaid: effectiveParticipantUaid } : {}),
           };
 
           await saveUserProfile(payload);
-
-          // Prefer first/last name for in-app display once set.
-          const preferred = `${firstName} ${lastName}`.trim();
-          if (preferred && user && user.name !== preferred) {
-            setUser({ ...user, name: preferred });
-          }
         } catch (error) {
           console.warn("Failed to save user profile:", error);
         }
@@ -323,14 +393,8 @@ export default function OnboardingPage() {
     firstName,
     lastName,
     effectiveRole,
-    contributorSkills,
-    contributorAvailabilityHours,
-    contributorEngagementPreferences,
-    coordinatorCoalitionName,
-    coordinatorScope,
-    funderEntityName,
-    user,
-    setUser,
+    participantUaid,
+    existingIndividualProfile,
   ]);
 
   // Fetch AA address if missing when on step 2 and save to database
@@ -492,18 +556,8 @@ export default function OnboardingPage() {
       typeof (existingIndividualProfile as any).participant_uaid === "string" &&
       !!(existingIndividualProfile as any).participant_uaid;
 
-    // If we already have everything for steps 2-3, jump to org step.
-    if (hasNames && hasParticipant) {
-      autoAdvancedEoaRef.current = eoa;
-      setStep(4);
-      return;
-    }
-
-    // If we already have names, proceed to participant agent step.
-    if (hasNames) {
-      autoAdvancedEoaRef.current = eoa;
-      setStep(3);
-    }
+    // Do not auto-advance. Users may need to correct role/name even if
+    // the participant agent already exists.
   }, [step, walletAddress, existingIndividualProfile]);
 
   // Step 3: if an individuals record already exists for this EOA, hydrate fields and allow continuing.
@@ -795,8 +849,8 @@ export default function OnboardingPage() {
 
   const connectToOrgAgent = React.useCallback(
     async (agent: any) => {
-      if (!walletAddress) {
-        setError("Missing wallet address. Please reconnect and try again.");
+      if (!participantUaid) {
+        setError("Missing participant UAID. Create your participant agent first.");
         return;
       }
 
@@ -824,59 +878,30 @@ export default function OnboardingPage() {
       };
 
       try {
-        // UAID is canonical. Try to use it from the selected agent card; otherwise hydrate via by-account.
-        let effectiveUaid: string | null =
-          typeof agent?.uaid === "string" && agent.uaid.trim()
-            ? agent.uaid.trim()
-            : typeof agent?.agent?.uaid === "string" && agent.agent.uaid.trim()
-              ? agent.agent.uaid.trim()
-              : null;
-        if (!effectiveUaid && agentAccount && chainId) {
-          try {
-            const didEthr = `did:ethr:${chainId}:${agentAccount}`;
-            const agentResp = await fetch(`/api/agents/by-account/${encodeURIComponent(didEthr)}`);
-            const agentData = agentResp.ok ? await agentResp.json().catch(() => null) : null;
-            effectiveUaid =
-              agentData && agentData.found === true && typeof agentData.uaid === "string" && agentData.uaid.trim()
-                ? String(agentData.uaid).trim()
-                : typeof agentData?.agent?.uaid === "string" && agentData.agent.uaid.trim()
-                  ? String(agentData.agent.uaid).trim()
-                  : null;
-          } catch {
-            // ignore; handled below
-          }
+        // UAID-only: compute the org UAID from chainId + org smart account.
+        const effectiveUaid =
+          agentAccount && /^0x[a-fA-F0-9]{40}$/.test(agentAccount)
+            ? `uaid:did:ethr:${chainId}:${agentAccount.toLowerCase()}`
+            : null;
+
+        if (!effectiveUaid) {
+          throw new Error("Selected organization is missing agent smart account address (agentAccount).");
         }
         if (effectiveUaid) {
           (defaultAgent as any).uaid = effectiveUaid;
         }
 
-        if (userEmail) {
-          await associateUserWithOrganization(userEmail, {
-            ens_name: ensName,
-            agent_name: agentName,
-            org_name: agent?.name || undefined,
-            org_address: undefined,
-            email_domain: emailDomain ?? "unknown",
-            uaid: effectiveUaid,
-            is_primary: false,
-            role: undefined,
-          });
-        } else {
-          await associateUserWithOrganizationByEoa(
-            walletAddress,
-            {
-              ens_name: ensName,
-              agent_name: agentName,
-              org_name: agent?.name || undefined,
-              org_address: undefined,
-              email_domain: emailDomain ?? "unknown",
-              uaid: effectiveUaid,
-              is_primary: false,
-              role: undefined,
-            },
-            null,
-          );
-        }
+        await upsertUserOrganizationByIndividualUaid({
+          individual_uaid: canonicalizeUaid(participantUaid) ?? participantUaid,
+          ens_name: ensName,
+          agent_name: agentName,
+          org_name: agent?.name || undefined,
+          org_address: undefined,
+          org_roles: null,
+          uaid: effectiveUaid,
+          is_primary: false,
+          role: undefined,
+        });
       } catch (e) {
         console.warn("[onboarding] Failed to persist org association:", e);
       }
@@ -885,7 +910,7 @@ export default function OnboardingPage() {
       setItg(ensName);
       setStep(6);
     },
-    [walletAddress, userEmail, setDefaultOrgAgent, emailDomain],
+    [participantUaid, setDefaultOrgAgent, emailDomain],
   );
 
   const handleCreateParticipantAgent = React.useCallback(async () => {
@@ -908,9 +933,13 @@ export default function OnboardingPage() {
     }
 
     setIsCreatingParticipant(true);
+    setParticipantCreateStartedAtMs(Date.now());
+    setParticipantCreateProgress(0);
+    setParticipantCreateStatus("Preparing wallet + smart account…");
     setError(null);
 
     try {
+      setParticipantCreateStatus("Connecting wallet…");
       const eip1193Provider =
         (web3auth as any).provider ??
         (typeof window !== "undefined" ? (window as any).ethereum : null);
@@ -931,6 +960,7 @@ export default function OnboardingPage() {
         return;
       }
 
+      setParticipantCreateStatus("Computing smart account address…");
       const agentAccountAddress = await getCounterfactualSmartAccountAddressByAgentName(
         agentName,
         account as `0x${string}`,
@@ -947,6 +977,7 @@ export default function OnboardingPage() {
       const didEns = `did:ens:${sepolia.id}:${ensName}`;
 
       try {
+        setParticipantCreateStatus("Checking ENS availability…");
         const availabilityCheck = await fetch(`/api/names/${encodeURIComponent(didEns)}/is-available`, {
           method: "GET",
         });
@@ -961,6 +992,7 @@ export default function OnboardingPage() {
         // ok to continue
       }
 
+      setParticipantCreateStatus("Registering ENS name + participant agent (on-chain)…");
       const agentUrl = `https://${agentName}.impact-agent.io`;
       const result = await createAgentWithWallet({
         agentData: {
@@ -981,9 +1013,11 @@ export default function OnboardingPage() {
         throw new Error("Participant agent creation did not return an agentId");
       }
 
+      setParticipantCreateStatus("Finalizing registration…");
       setParticipantEnsName(ensName);
 
       // Generate UAID for the participant smart account (admin-compatible endpoint).
+      setParticipantCreateStatus("Generating canonical UAID…");
       let createdUaid: string | null = null;
       try {
         const uaidRes = await fetch("/api/agents/generate-uaid", {
@@ -1001,13 +1035,23 @@ export default function OnboardingPage() {
         const uaidJson = await uaidRes.json().catch(() => ({} as any));
         const uaidValue = typeof uaidJson?.uaid === "string" ? uaidJson.uaid.trim() : "";
         if (uaidValue) {
-          createdUaid = uaidValue;
-          setParticipantUaid(uaidValue);
+          const canonical = canonicalizeUaid(uaidValue) ?? canonicalizeUaid(`uaid:${uaidValue}`) ?? uaidValue.split(";")[0] ?? uaidValue;
+          createdUaid = canonical;
+          setParticipantUaid(canonical);
         }
       } catch {
         // ignore
       }
 
+      if (!createdUaid) {
+        // Best-effort fallback (canonical form only)
+        const fallback = canonicalizeUaid(`uaid:did:ethr:${sepolia.id}:${String(agentAccountAddress).toLowerCase()}`) ??
+          `uaid:did:ethr:${sepolia.id}:${String(agentAccountAddress).toLowerCase()}`;
+        createdUaid = fallback;
+        setParticipantUaid(fallback);
+      }
+
+      setParticipantCreateStatus("Saving to your profile…");
       await saveUserProfile({
         ...(userEmail ? { email: userEmail } : {}),
         role: effectiveRole,
@@ -1020,24 +1064,9 @@ export default function OnboardingPage() {
         participant_ens_name: ensName,
         participant_agent_name: agentName,
         participant_uaid: createdUaid,
-        participant_metadata: (() => {
-          const participantMeta: Record<string, any> = {};
-          if (effectiveRole === "contributor") {
-            if (contributorSkills.trim()) participantMeta.skills = contributorSkills.trim();
-            if (contributorAvailabilityHours.trim()) {
-              const n = Number(contributorAvailabilityHours.trim());
-              participantMeta.availability_hours_per_week = Number.isFinite(n) ? n : contributorAvailabilityHours.trim();
-            }
-            if (contributorEngagementPreferences.trim()) participantMeta.engagement_preferences = contributorEngagementPreferences.trim();
-          } else if (effectiveRole === "coordinator") {
-            if (coordinatorCoalitionName.trim()) participantMeta.coalition_name = coordinatorCoalitionName.trim();
-            if (coordinatorScope.trim()) participantMeta.coordination_scope = coordinatorScope.trim();
-          } else if (effectiveRole === "funder") {
-            if (funderEntityName.trim()) participantMeta.funder_entity_name = funderEntityName.trim();
-          }
-          return Object.keys(participantMeta).length ? JSON.stringify(participantMeta) : null;
-        })(),
       });
+
+      setParticipantCreateStatus("Done.");
     } catch (e: any) {
       const msg = e?.message || String(e);
       if (msg.includes("user rejected") || msg.includes("User denied")) {
@@ -1047,6 +1076,7 @@ export default function OnboardingPage() {
       }
     } finally {
       setIsCreatingParticipant(false);
+      setParticipantCreateStartedAtMs(null);
     }
   }, [
     normalizedParticipantAgentName,
@@ -1061,21 +1091,11 @@ export default function OnboardingPage() {
     aaAddress,
     userPhone,
     user?.name,
-    contributorSkills,
-    contributorAvailabilityHours,
-    contributorEngagementPreferences,
-    coordinatorCoalitionName,
-    coordinatorScope,
-    funderEntityName,
   ]);
 
   const handleOrgNext = React.useCallback(async () => {
     if (!org.name || !org.address) {
       setError("Please complete all organization fields before continuing.");
-      return;
-    }
-    if (!Array.isArray(orgRoles) || orgRoles.length === 0) {
-      setError("Select at least one organizational role (coalition, contributor, funding, member).");
       return;
     }
 
@@ -1190,9 +1210,13 @@ export default function OnboardingPage() {
     }
 
     setIsCreatingItg(true);
+    setOrgCreateStartedAtMs(Date.now());
+    setOrgCreateProgress(0);
+    setOrgCreateStatus("Preparing wallet + smart account…");
     setError(null);
 
     try {
+      setOrgCreateStatus("Connecting wallet…");
       // Resolve an EIP-1193 provider (Web3Auth first, then window.ethereum as fallback).
       const eip1193Provider =
         (web3auth as any).provider ??
@@ -1210,6 +1234,7 @@ export default function OnboardingPage() {
       };
 
       // Resolve connected account (EOA) from provider
+      setOrgCreateStatus("Getting wallet address…");
       const accounts = await provider.request({
         method: "eth_accounts"
       });
@@ -1223,6 +1248,7 @@ export default function OnboardingPage() {
       }
 
       // Compute the counterfactual AA address for the agent using the client helper.
+      setOrgCreateStatus("Computing smart account address…");
       const agentAccountAddress = await getCounterfactualSmartAccountAddressByAgentName(
         agentName,
         account as `0x${string}`,
@@ -1251,6 +1277,7 @@ export default function OnboardingPage() {
 
       // Double-check agent name availability before attempting creation
       try {
+        setOrgCreateStatus("Checking ENS availability…");
         const ensName = `${agentName}.${ensOrgName}.eth`;
         const didEns = `did:ens:${sepolia.id}:${ensName}`;
         const encodedEnsDid = encodeURIComponent(didEns);
@@ -1275,6 +1302,7 @@ export default function OnboardingPage() {
       let result;
       let agentCreationSuccessful = false;
       try {
+        setOrgCreateStatus("Registering ENS name + organization agent (on-chain)…");
         const agentUrl = `https://${agentName}.impact-agent.io`;
         result = await createAgentWithWallet({
           agentData: {
@@ -1295,6 +1323,7 @@ export default function OnboardingPage() {
         });
 
         console.info("......... result ......... ", result);
+        setOrgCreateStatus("Finalizing registration…");
         
         // Verify that the result indicates successful creation
         // Check for agentId or other success indicators
@@ -1336,6 +1365,7 @@ export default function OnboardingPage() {
         throw createError; // Re-throw to be caught by outer catch
       }
 
+      setOrgCreateStatus("Verifying smart account…");
       const indivAccountClient: any =
         await IndivService.getCounterfactualAccountClientByIndividual(
           account as `0x${string}`,
@@ -1393,154 +1423,52 @@ export default function OnboardingPage() {
 
       // Associate user with the newly created organization ONLY if agent creation was successful
       // (Profile is already saved incrementally throughout the onboarding process)
-      if (agentCreationSuccessful && walletAddress) {
+      if (agentCreationSuccessful) {
         try {
+          setOrgCreateStatus("Linking organization to your individual…");
+          const individualUaid = canonicalizeUaid(participantUaid) ?? participantUaid;
+          if (!individualUaid) {
+            throw new Error("Missing participant UAID (create your participant agent first).");
+          }
+
+          setOrgCreateStatus("Computing canonical UAID…");
           const ensName = `${agentName}.${ensOrgName}.eth`;
-          
-          // First, get the actual agent account address from the result or fetch it
-          let actualAgentAccount = agentAccountAddress;
-          
-          // Try to get agent ID from result if available
-          let agentId: string | bigint | undefined = (result as any)?.agentId;
-          
-          // If we have an agent ID, fetch full agent details
-          // Otherwise, try to fetch by account address
-          let fullAgentDetails: any = null;
-          
-          try {
-            // Wait a moment for the agent to be indexed
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            
-            // Try to fetch by account address first
-            const didEthr = `did:ethr:${sepolia.id}:${agentAccountAddress}`;
-            const encodedDid = encodeURIComponent(didEthr);
-            const agentResponse = await fetch(`/api/agents/by-account/${encodedDid}`);
-            
-            if (agentResponse.ok) {
-              const agentResult = await agentResponse.json();
-              if (agentResult?.found === true) {
-                fullAgentDetails = agentResult;
-                actualAgentAccount = agentResult.agentAccount || agentAccountAddress;
-                agentId = agentResult.agentId;
-                console.info("[onboarding] Fetched full agent details after creation:", agentResult.agentId);
-              } else {
-                // Agent was not found on-chain - this means creation failed
-                console.error("[onboarding] Agent creation verification failed: agent not found on-chain");
-                throw new Error("Agent was not found on-chain after creation. The transaction may have failed.");
-              }
-            } else {
-              // Failed to verify agent existence
-              console.error("[onboarding] Failed to verify agent creation on-chain");
-              throw new Error("Failed to verify agent creation on-chain");
-            }
-          } catch (fetchError) {
-            console.error("[onboarding] Failed to verify agent creation, aborting database association:", fetchError);
-            // Re-throw to prevent database record creation
-            throw fetchError;
-          }
-          
-          // Generate UAID for the org smart account (best-effort).
-          let createdOrgUaid: string | null = null;
-          try {
-            const uaidRes = await fetch("/api/agents/generate-uaid", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                agentAccount: actualAgentAccount,
-                chainId: sepolia.id,
-                uid: `did:ethr:${sepolia.id}:${String(actualAgentAccount).toLowerCase()}`,
-                registry: "smart-agent",
-                proto: "a2a",
-                nativeId: `eip155:${sepolia.id}:${String(actualAgentAccount).toLowerCase()}`,
-              }),
-            });
-            const uaidJson = await uaidRes.json().catch(() => ({} as any));
-            const uaidValue = typeof uaidJson?.uaid === "string" ? uaidJson.uaid.trim() : "";
-            if (uaidValue) {
-              createdOrgUaid = uaidValue;
-              setOrgUaid(uaidValue);
-            }
-          } catch {
-            // ignore
-          }
+          const orgUaid = `uaid:did:ethr:${sepolia.id}:${String(agentAccountAddress).toLowerCase()}`;
+          setOrgUaid(orgUaid);
 
-          const hydratedOrgUaid: string | null =
-            typeof createdOrgUaid === "string" && createdOrgUaid.trim()
-              ? createdOrgUaid.trim()
-              : typeof (fullAgentDetails as any)?.uaid === "string" && String((fullAgentDetails as any).uaid).trim()
-                ? String((fullAgentDetails as any).uaid).trim()
-                : typeof (fullAgentDetails as any)?.agent?.uaid === "string" && String((fullAgentDetails as any).agent.uaid).trim()
-                  ? String((fullAgentDetails as any).agent.uaid).trim()
-                  : null;
-
-          const orgAssociationPayload = {
+          setOrgCreateStatus("Saving organization to the database…");
+          await upsertUserOrganizationByIndividualUaid({
+            individual_uaid: individualUaid,
             ens_name: ensName,
             agent_name: agentName,
             org_name: org.name || undefined,
             org_address: org.address || undefined,
-            org_roles: orgRoles,
-            email_domain: emailDomain ?? "unknown",
-            uaid: hydratedOrgUaid,
-            org_metadata: (() => {
-              const m: Record<string, any> = {};
-              if (effectiveRole === "org-admin") {
-                if (orgSector.trim()) m.sector = orgSector.trim();
-                if (orgPrograms.trim()) m.programs = orgPrograms.trim();
-                if (orgServiceAreas.trim()) m.service_areas = orgServiceAreas.trim();
-                if (orgAnnualBudget.trim()) {
-                  const n = Number(orgAnnualBudget.trim());
-                  m.annual_budget = Number.isFinite(n) ? n : orgAnnualBudget.trim();
-                }
-              } else if (effectiveRole === "funder") {
-                if (funderEntityType.trim()) m.entity_type = funderEntityType.trim();
-                if (funderFocusAreas.trim()) m.focus_areas = funderFocusAreas.trim();
-                if (funderGeographicScope.trim()) m.geographic_scope = funderGeographicScope.trim();
-                if (funderComplianceRequirements.trim()) m.compliance_requirements = funderComplianceRequirements.trim();
-              } else if (effectiveRole === "coordinator") {
-                if (coordinatorCoalitionName.trim()) m.coalition_name = coordinatorCoalitionName.trim();
-                if (coordinatorScope.trim()) m.coordination_scope = coordinatorScope.trim();
-              }
-              return Object.keys(m).length ? JSON.stringify(m) : null;
-            })(),
-            is_primary: true, // This is the primary org based on email domain
-          };
+            org_roles: Array.isArray(orgRoles) && orgRoles.length > 0 ? orgRoles : [defaultOrgRoleForIndividual],
+            uaid: orgUaid,
+            org_metadata: null,
+            is_primary: true,
+            role: undefined,
+          });
 
-          // Only create database record if agent was successfully verified on-chain
-          if (userEmail) {
-            await associateUserWithOrganization(userEmail, orgAssociationPayload);
-          } else {
-            await associateUserWithOrganizationByEoa(walletAddress, orgAssociationPayload, null);
-          }
-
-          // Set as default org agent with full details
+          // Set as default org agent (we already have agentId from creation result)
           const defaultAgent: DefaultOrgAgent = {
             ensName,
             agentName,
-            agentAccount: actualAgentAccount,
-            agentId: agentId || fullAgentDetails?.agentId,
+            agentAccount: agentAccountAddress,
+            agentId: (result as any)?.agentId,
             chainId: sepolia.id,
-            name: fullAgentDetails?.name || agentName,
-            description: fullAgentDetails?.description || (result as any)?.description || 'itg account',
-            image: fullAgentDetails?.image || (result as any)?.image || 'https://www.google.com',
-            agentUrl: fullAgentDetails?.agentUrl || (result as any)?.agentUrl || 'https://www.google.com',
-            tokenUri: fullAgentDetails?.tokenUri || (result as any)?.tokenUri,
-            metadata: fullAgentDetails?.metadata || (result as any)?.metadata,
-            did: fullAgentDetails?.did,
-            a2aEndpoint: fullAgentDetails?.a2aEndpoint || (result as any)?.a2aEndpoint,
-            ...(hydratedOrgUaid ? { uaid: hydratedOrgUaid } : {}),
-            ...(fullAgentDetails || result as any),
+            name: (result as any)?.name || agentName,
+            description: (result as any)?.description || "itg account",
+            image: (result as any)?.image,
+            agentUrl: `https://${agentName}.impact-agent.io`,
+            tokenUri: (result as any)?.tokenUri,
+            metadata: (result as any)?.metadata,
+            did: (result as any)?.did,
+            a2aEndpoint: (result as any)?.a2aEndpoint,
+            uaid: orgUaid,
           };
-          
-          console.info("[onboarding] Setting default agent with full details:", {
-            agentName: defaultAgent.agentName,
-            agentAccount: defaultAgent.agentAccount,
-            agentId: defaultAgent.agentId,
-            did: defaultAgent.did,
-          });
-          
           setDefaultOrgAgent(defaultAgent);
-          
-          // Wait a moment to ensure state is saved before any navigation
+
           await new Promise((resolve) => setTimeout(resolve, 200));
         } catch (error) {
           console.warn("Failed to associate user with organization:", error);
@@ -1551,6 +1479,7 @@ export default function OnboardingPage() {
       // and use the human-readable agent name as the Impact identifier.
       setItg(agentName);
       setStep(6);
+      setOrgCreateStatus("Done.");
     } catch (e) {
       // Error handling is done in the inner try-catch above
       // This outer catch is just for any unexpected errors that weren't caught by inner catch
@@ -1569,6 +1498,7 @@ export default function OnboardingPage() {
       }
     } finally {
       setIsCreatingItg(false);
+      setOrgCreateStartedAtMs(null);
     }
   }, [
     normalizedOrgAgentName,
@@ -1576,8 +1506,10 @@ export default function OnboardingPage() {
     org.name,
     org.address,
     orgRoles,
+    defaultOrgRoleForIndividual,
+    emailDomain,
+    participantUaid,
     web3auth,
-    user?.email,
     setDefaultOrgAgent,
   ]);
 
@@ -1780,105 +1712,24 @@ export default function OnboardingPage() {
             <div style={{ fontWeight: 600, marginBottom: "0.5rem" }}>
               Registration role: <span style={{ color: "#1e40af" }}>{roleLabel}</span>
             </div>
+            <div style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: "0.75rem" }}>
+              Capabilities and organization details are set after onboarding (you can always edit later).
+            </div>
 
-            {effectiveRole === "contributor" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span>Skills (comma-separated)</span>
-                  <input
-                    type="text"
-                    value={contributorSkills}
-                    onChange={(e) => setContributorSkills(e.target.value)}
-                    placeholder="e.g. Data Analysis, Grant Writing"
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid #cbd5f5",
-                    }}
-                  />
-                </label>
-                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span>Availability (hours/week)</span>
-                  <input
-                    type="text"
-                    value={contributorAvailabilityHours}
-                    onChange={(e) => setContributorAvailabilityHours(e.target.value)}
-                    placeholder="e.g. 5"
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid #cbd5f5",
-                    }}
-                  />
-                </label>
-                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span>Engagement preferences</span>
-                  <input
-                    type="text"
-                    value={contributorEngagementPreferences}
-                    onChange={(e) => setContributorEngagementPreferences(e.target.value)}
-                    placeholder="e.g. short engagements, remote-first"
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid #cbd5f5",
-                    }}
-                  />
-                </label>
-              </div>
-            )}
-
-            {effectiveRole === "coordinator" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span>Coalition name</span>
-                  <input
-                    type="text"
-                    value={coordinatorCoalitionName}
-                    onChange={(e) => setCoordinatorCoalitionName(e.target.value)}
-                    placeholder="e.g. Unite DFW"
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid #cbd5f5",
-                    }}
-                  />
-                </label>
-                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span>Coordination scope</span>
-                  <input
-                    type="text"
-                    value={coordinatorScope}
-                    onChange={(e) => setCoordinatorScope(e.target.value)}
-                    placeholder="e.g. workforce + housing initiatives"
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid #cbd5f5",
-                    }}
-                  />
-                </label>
-              </div>
-            )}
-
-            {effectiveRole === "funder" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span>Funding entity name</span>
-                  <input
-                    type="text"
-                    value={funderEntityName}
-                    onChange={(e) => setFunderEntityName(e.target.value)}
-                    placeholder="e.g. Example Foundation"
-                    style={{
-                      padding: "0.5rem 0.75rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid #cbd5f5",
-                    }}
-                  />
-                </label>
-              </div>
-            )}
+            <div style={{ fontSize: "0.9rem", color: "#334155", lineHeight: 1.5 }}>
+              <div style={{ marginBottom: "0.5rem", fontWeight: 600 }}>Next steps</div>
+              <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
+                <li>
+                  <strong>Capabilities</strong> (skills, availability, location, coordinator review/fulfillment): set these after onboarding in{" "}
+                  <a href="/user-capabilities">Capabilities</a>.
+                </li>
+                <li>
+                  <strong>Organization names</strong> (coalition name, funding entity name): set these when you create/select an organization in step 4/5
+                  and later in <a href="/organization-settings">Organization Settings</a> or{" "}
+                  <a href="/coalition-settings">Coalition Settings</a>.
+                </li>
+              </ul>
+            </div>
           </div>
 
           <div
@@ -1905,8 +1756,73 @@ export default function OnboardingPage() {
               type="button"
               onClick={(e) => {
                 e.preventDefault();
-                // Profile is already saved incrementally via useEffect
-                setStep(3);
+                if (isSavingStep2) return;
+                setIsSavingStep2(true);
+                setError(null);
+                (async () => {
+                  try {
+                    const effectiveParticipantUaid =
+                      (typeof participantUaid === "string" && participantUaid.trim()
+                        ? participantUaid.trim()
+                        : typeof (existingIndividualProfile as any)?.participant_uaid === "string" &&
+                            String((existingIndividualProfile as any).participant_uaid).trim()
+                          ? String((existingIndividualProfile as any).participant_uaid).trim()
+                          : null);
+                    const payload: UserProfile = {
+                      ...(typeof (existingIndividualProfile as any)?.id === "number" &&
+                      Number.isFinite((existingIndividualProfile as any).id) &&
+                      (existingIndividualProfile as any).id > 0
+                        ? { id: (existingIndividualProfile as any).id }
+                        : {}),
+                      ...(userEmail ? { email: userEmail } : {}),
+                      role: effectiveRole,
+                      first_name: firstName || null,
+                      last_name: lastName || null,
+                      eoa_address: walletAddress || null,
+                      aa_address: aaAddress || null,
+                      ...(effectiveParticipantUaid ? { participant_uaid: effectiveParticipantUaid } : {}),
+                    };
+
+                    // 1) Save once (may create the individual if missing)
+                    const saved = await saveUserProfile(payload);
+                    setExistingIndividualProfile(saved);
+
+                    const desiredRole = String(effectiveRole || "").trim().toLowerCase();
+                    const desiredFirst = String(firstName || "").trim();
+                    const desiredLast = String(lastName || "").trim();
+                    const gotRole = String((saved as any)?.role || "").trim().toLowerCase();
+                    const gotFirst = String((saved as any)?.first_name || "").trim();
+                    const gotLast = String((saved as any)?.last_name || "").trim();
+
+                    // 2) If values didn't stick, force a second save targeting individual_id.
+                    if (
+                      (desiredRole && gotRole !== desiredRole) ||
+                      (desiredFirst && gotFirst !== desiredFirst) ||
+                      (desiredLast && gotLast !== desiredLast)
+                    ) {
+                      const savedId = (saved as any)?.id;
+                      if (typeof savedId === "number" && Number.isFinite(savedId) && savedId > 0) {
+                        const saved2 = await saveUserProfile({ ...payload, id: savedId });
+                        setExistingIndividualProfile(saved2);
+                        const gotRole2 = String((saved2 as any)?.role || "").trim().toLowerCase();
+                        const gotFirst2 = String((saved2 as any)?.first_name || "").trim();
+                        const gotLast2 = String((saved2 as any)?.last_name || "").trim();
+                        if (
+                          (desiredRole && gotRole2 !== desiredRole) ||
+                          (desiredFirst && gotFirst2 !== desiredFirst) ||
+                          (desiredLast && gotLast2 !== desiredLast)
+                        ) {
+                          throw new Error("Profile save did not persist your role/name. Please retry.");
+                        }
+                      }
+                    }
+                    setStep(3);
+                  } catch (err: any) {
+                    setError(err?.message || "Failed to save your profile. Please try again.");
+                  } finally {
+                    setIsSavingStep2(false);
+                  }
+                })();
               }}
               style={{
                 padding: "0.5rem 1.25rem",
@@ -1915,10 +1831,11 @@ export default function OnboardingPage() {
                 backgroundColor: "#2563eb",
                 color: "white",
                 fontWeight: 600,
-                cursor: "pointer"
+                cursor: isSavingStep2 ? "not-allowed" : "pointer",
+                opacity: isSavingStep2 ? 0.7 : 1,
               }}
             >
-              Continue
+              {isSavingStep2 ? "Saving…" : "Continue"}
             </button>
           </div>
         </section>
@@ -2037,13 +1954,42 @@ export default function OnboardingPage() {
               <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>Participant agent created</div>
               <div style={{ fontSize: "0.85rem", color: "#14532d" }}>
                 <div>
-                  <strong>UAID:</strong> {participantUaid}
+                  <strong>UAID:</strong> {canonicalizeUaid(participantUaid) ?? String(participantUaid).split(";")[0]}
                 </div>
                 {participantEnsName && (
                   <div>
                     <strong>ENS:</strong> {participantEnsName}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {isCreatingParticipant && (
+            <div
+              style={{
+                padding: "1rem",
+                marginBottom: "1rem",
+                borderRadius: "0.5rem",
+                backgroundColor: "#eff6ff",
+                border: "1px solid #93c5fd",
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: "0.5rem", color: "#1e3a8a" }}>
+                Creating participant agent (up to ~3 minutes)
+              </div>
+              <div style={{ height: 10, borderRadius: 9999, backgroundColor: "rgba(37,99,235,0.15)", overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${Math.round(participantCreateProgress * 100)}%`,
+                    backgroundColor: "#2563eb",
+                    transition: "width 250ms linear",
+                  }}
+                />
+              </div>
+              <div style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "#1e40af" }}>
+                {participantCreateStatus || "Working…"}
               </div>
             </div>
           )}
@@ -2540,188 +2486,16 @@ export default function OnboardingPage() {
                 border: "1px solid #e2e8f0",
               }}
             >
-              <div style={{ marginBottom: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>
-                Organizational roles (required)
+              <div style={{ marginBottom: "0.5rem", fontWeight: 600, fontSize: "0.9rem" }}>
+                Organization role
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                {([
-                  { id: "coalition", label: "Coalition org" },
-                  { id: "contributor", label: "Contributor org" },
-                  { id: "funding", label: "Funding org" },
-                  { id: "member", label: "Member org" },
-                ] as const).map((opt) => {
-                  const checked = orgRoles.includes(opt.id);
-                  return (
-                    <label key={opt.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          const next = new Set(orgRoles);
-                          if (e.target.checked) next.add(opt.id);
-                          else next.delete(opt.id);
-                          setOrgRoles(Array.from(next));
-                        }}
-                      />
-                      <span>{opt.label}</span>
-                    </label>
-                  );
-                })}
-              </div>
-              <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#6b7280" }}>
-                Choose one or more roles for this organization. These are used for coalition-tagging initiatives.
+              <div style={{ fontSize: "0.85rem", color: "#64748b", lineHeight: 1.5 }}>
+                We auto-set this based on your individual role during onboarding:
+                <div style={{ marginTop: "0.35rem", color: "#111827", fontWeight: 600 }}>
+                  {defaultOrgRoleForIndividual}
+                </div>
               </div>
             </div>
-
-            {effectiveRole === "org-admin" && (
-              <div
-                style={{
-                  padding: "1rem",
-                  borderRadius: "0.5rem",
-                  backgroundColor: "#f8fafc",
-                  border: "1px solid #e2e8f0",
-                }}
-              >
-                <div style={{ marginBottom: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>
-                  Organization profile
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span>Sector</span>
-                    <input
-                      type="text"
-                      value={orgSector}
-                      onChange={(e) => setOrgSector(e.target.value)}
-                      placeholder="e.g. Workforce, Housing, Health"
-                      style={{
-                        padding: "0.5rem 0.75rem",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #cbd5f5",
-                      }}
-                    />
-                  </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span>Programs / service areas</span>
-                    <input
-                      type="text"
-                      value={orgPrograms}
-                      onChange={(e) => setOrgPrograms(e.target.value)}
-                      placeholder="e.g. job placement, wraparound services"
-                      style={{
-                        padding: "0.5rem 0.75rem",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #cbd5f5",
-                      }}
-                    />
-                  </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span>Geographic service areas</span>
-                    <input
-                      type="text"
-                      value={orgServiceAreas}
-                      onChange={(e) => setOrgServiceAreas(e.target.value)}
-                      placeholder="e.g. Dallas County, Tarrant County"
-                      style={{
-                        padding: "0.5rem 0.75rem",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #cbd5f5",
-                      }}
-                    />
-                  </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span>Approx annual budget (USD)</span>
-                    <input
-                      type="text"
-                      value={orgAnnualBudget}
-                      onChange={(e) => setOrgAnnualBudget(e.target.value)}
-                      placeholder="e.g. 2500000"
-                      style={{
-                        padding: "0.5rem 0.75rem",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #cbd5f5",
-                      }}
-                    />
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {effectiveRole === "funder" && (
-              <div
-                style={{
-                  padding: "1rem",
-                  borderRadius: "0.5rem",
-                  backgroundColor: "#f8fafc",
-                  border: "1px solid #e2e8f0",
-                }}
-              >
-                <div style={{ marginBottom: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>
-                  Funder profile
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span>Entity type</span>
-                    <select
-                      value={funderEntityType}
-                      onChange={(e) => setFunderEntityType(e.target.value)}
-                      style={{
-                        padding: "0.5rem 0.75rem",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #cbd5f5",
-                      }}
-                    >
-                      <option value="">Select…</option>
-                      <option value="foundation">Foundation</option>
-                      <option value="corporate">Corporate</option>
-                      <option value="individual">Individual</option>
-                      <option value="government">Government</option>
-                    </select>
-                  </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span>Funding focus areas</span>
-                    <input
-                      type="text"
-                      value={funderFocusAreas}
-                      onChange={(e) => setFunderFocusAreas(e.target.value)}
-                      placeholder="e.g. workforce, housing, health equity"
-                      style={{
-                        padding: "0.5rem 0.75rem",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #cbd5f5",
-                      }}
-                    />
-                  </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span>Geographic scope</span>
-                    <input
-                      type="text"
-                      value={funderGeographicScope}
-                      onChange={(e) => setFunderGeographicScope(e.target.value)}
-                      placeholder="e.g. DFW Metroplex"
-                      style={{
-                        padding: "0.5rem 0.75rem",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #cbd5f5",
-                      }}
-                    />
-                  </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span>Compliance / reporting requirements</span>
-                    <input
-                      type="text"
-                      value={funderComplianceRequirements}
-                      onChange={(e) => setFunderComplianceRequirements(e.target.value)}
-                      placeholder="e.g. quarterly reports, outcomes attested"
-                      style={{
-                        padding: "0.5rem 0.75rem",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #cbd5f5",
-                      }}
-                    />
-                  </label>
-                </div>
-              </div>
-            )}
           </div>
 
           <div
@@ -2872,6 +2646,35 @@ export default function OnboardingPage() {
             </button>
           </div>
 
+          {isCreatingItg && (
+            <div
+              style={{
+                padding: "1rem",
+                marginTop: "1rem",
+                borderRadius: "0.5rem",
+                backgroundColor: "#ecfdf5",
+                border: "1px solid rgba(22,163,74,0.35)",
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: "0.5rem", color: "#14532d" }}>
+                Creating organization identity (up to ~3 minutes)
+              </div>
+              <div style={{ height: 10, borderRadius: 9999, backgroundColor: "rgba(22,163,74,0.15)", overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${Math.round(orgCreateProgress * 100)}%`,
+                    backgroundColor: "#16a34a",
+                    transition: "width 250ms linear",
+                  }}
+                />
+              </div>
+              <div style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "#166534" }}>
+                {orgCreateStatus || "Working…"}
+              </div>
+            </div>
+          )}
+
           {emailDomain && (
             <p
               style={{
@@ -2932,7 +2735,7 @@ export default function OnboardingPage() {
                 marginBottom: "1rem",
               }}
             >
-              {participantUaid}
+              {canonicalizeUaid(participantUaid) ?? String(participantUaid).split(";")[0]}
             </div>
           )}
 

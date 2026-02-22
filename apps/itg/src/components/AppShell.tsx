@@ -6,7 +6,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Box,
   Divider,
-  Drawer,
   List,
   ListItemButton,
   ListItemText,
@@ -173,23 +172,17 @@ export function AppShell(props: {
         display: "grid",
         gridTemplateColumns: { xs: "1fr", md: `${DRAWER_WIDTH}px 1fr` },
         gap: 0,
-        minHeight: "calc(100vh - 64px)",
+        alignItems: "start",
       }}
     >
-      <Box sx={{ display: { xs: "none", md: "block" } }}>
-        <Drawer
-          variant="permanent"
-          open
-          PaperProps={{
-            sx: {
-              position: "relative",
-              width: DRAWER_WIDTH,
-              borderRight: `1px solid ${theme.palette.divider}`,
-            },
-          }}
-        >
-          {sidebar}
-        </Drawer>
+      <Box
+        sx={{
+          display: { xs: "none", md: "block" },
+          width: DRAWER_WIDTH,
+          borderRight: `1px solid ${theme.palette.divider}`,
+        }}
+      >
+        {sidebar}
       </Box>
 
       {/* Mobile: show content only (header already has nav) */}

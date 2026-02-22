@@ -99,11 +99,10 @@ export function CurrentUserProfileProvider({ children }: { children: React.React
   }, [walletAddress, refresh, hasHydrated]);
 
   const role = React.useMemo<AppRole | null>(() => {
-    if (profile) {
-      return normalizeAppRole(profile.role) as AppRole;
-    }
-    // If connected but profile isn't created/hydrated yet, default to org_admin for navigation.
-    return user ? ("org_admin" as AppRole) : null;
+    const hasParticipantUaid =
+      typeof (profile as any)?.participant_uaid === "string" && !!String((profile as any).participant_uaid).trim();
+    if (!hasParticipantUaid) return null;
+    return normalizeAppRole(profile?.role) as AppRole;
   }, [profile, user]);
 
   const setRole = React.useCallback(
