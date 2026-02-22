@@ -41,11 +41,13 @@ export async function GET(
     }
 
     const agentId = extractAgentId(details);
+    // Avoid duplicate `agentId` key warning when spreading `details` (which may already include it).
+    const { agentId: _agentId, ...detailsRest } = details as any;
     return NextResponse.json({
       found: true,
       uaid,
       agentId,
-      ...details,
+      ...detailsRest,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

@@ -46,30 +46,15 @@ importers:
 
   apps/impact-agent:
     dependencies:
-      '@agentic-trust/8004-ext-sdk':
-        specifier: 1.0.42
-        version: 1.0.42(bufferutil@4.0.9)(debug@4.4.3)(encoding@0.1.13)(react@18.3.1)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
-      '@agentic-trust/8004-sdk':
-        specifier: 1.0.42
-        version: 1.0.42(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(viem@2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76))
-      '@agentic-trust/core':
-        specifier: 1.0.42
-        version: 1.0.42(e67e8306693af0bc1d0a3c99aa957fcc)
       '@hono/node-server':
         specifier: ^1.19.6
         version: 1.19.6(hono@4.10.7)
-      '@my-scope/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1
       hono:
         specifier: ^4.10.7
         version: 4.10.7
-      viem:
-        specifier: ^2.0.0
-        version: 2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -88,16 +73,16 @@ importers:
     dependencies:
       '@agentic-trust/8004-ext-sdk':
         specifier: 1.0.42
-        version: 1.0.42(bufferutil@4.0.9)(debug@4.4.3)(encoding@0.1.13)(react@18.3.1)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
+        version: 1.0.42(bufferutil@4.0.9)(debug@4.4.3)(encoding@0.1.13)(react@18.3.1)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@agentic-trust/8004-sdk':
         specifier: 1.0.42
-        version: 1.0.42(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(viem@2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))
+        version: 1.0.42(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(viem@2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76))
       '@agentic-trust/core':
         specifier: 1.0.42
-        version: 1.0.42(12594971d880719c8f8daa06738bcb05)
+        version: 1.0.42(767ff34e53b856e7ec3858515c07730b)
       '@agentic-trust/veramo-agent-extension':
         specifier: 1.0.42
-        version: 1.0.42(bufferutil@4.0.9)(debug@4.4.3)(encoding@0.1.13)(react@18.3.1)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
+        version: 1.0.42(bufferutil@4.0.9)(debug@4.4.3)(encoding@0.1.13)(react@18.3.1)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@emotion/cache':
         specifier: ^11.11.3
         version: 11.14.0
@@ -109,10 +94,10 @@ importers:
         version: 11.14.1(@emotion/react@11.14.0(@types/react@18.3.27)(react@18.3.1))(@types/react@18.3.27)(react@18.3.1)
       '@ethereum-attestation-service/eas-sdk':
         specifier: ^2.7.0
-        version: 2.9.0(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.19.25)(typescript@5.9.3))(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
+        version: 2.9.0(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.19.25)(typescript@5.9.3))(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@metamask/smart-accounts-kit':
         specifier: ^0.1.0
-        version: 0.1.0(viem@2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))
+        version: 0.1.0(viem@2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76))
       '@mui/icons-material':
         specifier: ^5.15.17
         version: 5.18.0(@mui/material@5.18.0(@emotion/react@11.14.0(@types/react@18.3.27)(react@18.3.1))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@18.3.27)(react@18.3.1))(@types/react@18.3.27)(react@18.3.1))(@types/react@18.3.27)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@types/react@18.3.27)(react@18.3.1)
@@ -169,7 +154,7 @@ importers:
         version: 18.3.1(react@18.3.1)
       viem:
         specifier: ^2.0.0
-        version: 2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
+        version: 2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -9043,7 +9028,7 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@agentic-trust/core@1.0.42(e67e8306693af0bc1d0a3c99aa957fcc)':
+  '@agentic-trust/core@1.0.42(767ff34e53b856e7ec3858515c07730b)':
     dependencies:
       '@agentic-trust/8004-ext-sdk': 1.0.42(bufferutil@4.0.9)(debug@4.4.3)(encoding@0.1.13)(react@18.3.1)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
       '@agentic-trust/8004-sdk': 1.0.42(ethers@6.15.0(bufferutil@4.0.9)(utf-8-validate@5.0.10))(viem@2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76))
@@ -9068,6 +9053,8 @@ snapshots:
       viem: 2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
       web3: 1.10.4(bufferutil@4.0.9)(encoding@0.1.13)(utf-8-validate@5.0.10)
       web3.storage: 4.5.5(encoding@0.1.13)(node-fetch@2.7.0(encoding@0.1.13))
+    optionalDependencies:
+      next: 14.2.33(@babel/core@7.29.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
     transitivePeerDependencies:
       - '@azure/app-configuration'
       - '@azure/cosmos'
@@ -10011,7 +9998,7 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@ethereum-attestation-service/eas-sdk@2.9.0(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.19.25)(typescript@5.9.3))(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)':
+  '@ethereum-attestation-service/eas-sdk@2.9.0(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.19.25)(typescript@5.9.3))(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)':
     dependencies:
       '@ethereum-attestation-service/eas-contracts': 1.7.1(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.19.25)(typescript@5.9.3))(typescript@5.9.3)(utf-8-validate@5.0.10)
       '@openzeppelin/merkle-tree': 1.0.8
@@ -10021,7 +10008,7 @@ snapshots:
       multiformats: 9.9.0
       pako: 2.1.0
       semver: 7.7.3
-      viem: 2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
+      viem: 2.39.3(bufferutil@4.0.9)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.76)
     transitivePeerDependencies:
       - bufferutil
       - c-kzg
