@@ -19,6 +19,10 @@ export async function GET(request: NextRequest) {
     const individualIdFromParam =
       individualIdParam && Number.isFinite(Number(individualIdParam)) ? Number.parseInt(individualIdParam, 10) : null;
     const scope = (searchParams.get("scope") ?? "active").toLowerCase(); // active|mine|all
+    const stateFilterRaw = (searchParams.get("state") ?? "").trim().toLowerCase();
+    const coalitionOrgIdRaw = (searchParams.get("coalitionOrgId") ?? searchParams.get("coalition_org_id") ?? "").trim();
+    const coalitionOrgId =
+      coalitionOrgIdRaw && /^\d+$/.test(coalitionOrgIdRaw) ? Number.parseInt(coalitionOrgIdRaw, 10) : null;
 
     const db = await getDB();
     if (!db) return NextResponse.json({ error: "Database not available" }, { status: 500 });
@@ -40,6 +44,15 @@ export async function GET(request: NextRequest) {
     const whereParts: string[] = [];
     const binds: any[] = [];
 
+    if (stateFilterRaw) {
+      const allowedStates = new Set(["draft", "chartered", "funded", "executing", "evaluating", "closed"]);
+      if (!allowedStates.has(stateFilterRaw)) {
+        return NextResponse.json({ error: "Invalid state" }, { status: 400 });
+      }
+      whereParts.push("state = ?");
+      binds.push(stateFilterRaw);
+    }
+
     if (scope === "active") {
       whereParts.push("state != 'closed'");
     }
@@ -58,6 +71,13 @@ export async function GET(request: NextRequest) {
       binds.push(individualId);
       binds.push(individualId ?? -1);
       binds.push(...orgIds);
+    }
+
+    if (typeof coalitionOrgId === "number" && coalitionOrgId > 0) {
+      whereParts.push(
+        `id IN (SELECT initiative_id FROM initiative_coalitions WHERE organization_id = ?)`,
+      );
+      binds.push(coalitionOrgId);
     }
 
     const where = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
@@ -96,6 +116,7 @@ export async function POST(request: NextRequest) {
       payout_rules_json,
       metadata_json,
       initial_participants,
+      coalition_org_ids,
     } = body || {};
 
     if (!title || typeof title !== "string" || !title.trim()) {
@@ -145,6 +166,26 @@ export async function POST(request: NextRequest) {
       .run();
 
     const initiativeId = Number(ins.meta.last_row_id);
+
+    // Optional: coalition org tags
+    if (Array.isArray(coalition_org_ids)) {
+      const nowTs = Math.floor(Date.now() / 1000);
+      for (const raw of coalition_org_ids) {
+        const orgId = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number.parseInt(raw, 10) : null;
+        if (!orgId || !Number.isFinite(orgId) || orgId <= 0) continue;
+        try {
+          await db
+            .prepare(
+              `INSERT OR IGNORE INTO initiative_coalitions (initiative_id, organization_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?)`,
+            )
+            .bind(initiativeId, orgId, nowTs, nowTs)
+            .run();
+        } catch {
+          // ignore
+        }
+      }
+    }
 
     // Creator as participant (best-effort)
     if (individualId) {

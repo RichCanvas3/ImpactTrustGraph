@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import type { D1Database } from '../../../../lib/db';
 import { getD1Database } from '../../../../lib/d1-wrapper';
+import { canonicalizeUaid } from '../../../../lib/uaid';
 
 /**
  * GET /api/users/profile?individualId=... or ?eoa=... or ?email=...
@@ -346,7 +347,8 @@ export async function POST(request: NextRequest) {
     try {
       const ensName = typeof participant_ens_name === "string" ? participant_ens_name : null;
       const agentName = typeof participant_agent_name === "string" ? participant_agent_name : null;
-      const uaid = typeof participant_uaid === "string" ? participant_uaid : null;
+      const uaidRaw = typeof participant_uaid === "string" ? participant_uaid.trim() : null;
+      const uaid = canonicalizeUaid(uaidRaw);
 
       const emailDomain =
         (typeof cleanedEmail === "string" && cleanedEmail.includes("@") ? cleanedEmail.split("@")[1]?.toLowerCase() : null) ??
@@ -355,15 +357,37 @@ export async function POST(request: NextRequest) {
 
       // We only key participant agent identity by UAID.
       if (uaid) {
-        const existingAgent = await db.prepare("SELECT id FROM agents WHERE uaid = ?").bind(uaid).first<{ id: number }>();
+        const existingAgentExact = await db.prepare("SELECT id FROM agents WHERE uaid = ?").bind(uaid).first<{ id: number }>();
+        const existingAgent =
+          existingAgentExact?.id
+            ? existingAgentExact
+            : await db
+                .prepare(
+                  `SELECT id FROM agents
+                   WHERE ('uaid:' || lower(
+                     CASE
+                       WHEN instr(CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END, ';') > 0
+                         THEN substr(CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END, 1,
+                                     instr(CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END, ';') - 1)
+                       ELSE CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END
+                     END
+                   )) = ?
+                   ORDER BY updated_at DESC, id DESC
+                   LIMIT 1`,
+                )
+                .bind(uaid)
+                .first<{ id: number }>();
 
         if (existingAgent?.id) {
           await db.prepare(
             `UPDATE agents
              SET uaid = COALESCE(?, uaid),
-                 ens_name = COALESCE(?, ens_name),
-                 agent_name = COALESCE(?, agent_name),
-                 email_domain = COALESCE(?, email_domain),
+                 ens_name = CASE WHEN ens_name IS NULL OR ens_name = '' THEN ? ELSE ens_name END,
+                 agent_name = CASE WHEN agent_name IS NULL OR agent_name = '' THEN ? ELSE agent_name END,
+                 email_domain = CASE
+                   WHEN email_domain IS NULL OR email_domain = '' OR lower(email_domain) = 'unknown' THEN ?
+                   ELSE email_domain
+                 END,
                  updated_at = ?
              WHERE id = ?`,
           ).bind(
@@ -431,7 +455,7 @@ export async function POST(request: NextRequest) {
         typeof aa_address === "string" ? aa_address : null,
         typeof participant_ens_name === "string" ? participant_ens_name : null,
         typeof participant_agent_name === "string" ? participant_agent_name : null,
-        typeof participant_uaid === "string" ? participant_uaid : null,
+        canonicalizeUaid(typeof participant_uaid === "string" ? participant_uaid.trim() : null),
         participantAgentRowId,
         typeof participant_metadata === "string" ? participant_metadata : null,
         typeof trust_tier === "string" ? trust_tier : null,
@@ -463,7 +487,7 @@ export async function POST(request: NextRequest) {
         aa_address || null,
         participant_ens_name || null,
         participant_agent_name || null,
-        participant_uaid || null,
+        canonicalizeUaid(typeof participant_uaid === "string" ? participant_uaid.trim() : null),
         participantAgentRowId,
         typeof participant_metadata === "string" ? participant_metadata : null,
         typeof trust_tier === "string" ? trust_tier : null,

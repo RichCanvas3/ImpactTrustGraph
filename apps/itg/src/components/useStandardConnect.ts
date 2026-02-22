@@ -465,7 +465,7 @@ export function useStandardConnect() {
                 uaid: null as string | null,
                 org_name: null as string | null,
                 org_address: null as string | null,
-                org_type: null as string | null,
+                org_roles: null as string[] | null,
                 is_primary: true,
                 role: null as string | null,
               };
@@ -728,7 +728,7 @@ export function useStandardConnect() {
         agent_name: selectedOrg.agent_name,
         org_name: selectedOrg.org_name ?? null,
         org_address: selectedOrg.org_address ?? null,
-        org_type: selectedOrg.org_type ?? null,
+        org_roles: Array.isArray((selectedOrg as any).org_roles) ? ((selectedOrg as any).org_roles as string[]) : null,
         uaid: effectiveUaid,
         session_package: selectedOrg.session_package ?? null,
         org_metadata: selectedOrg.org_metadata ?? null,

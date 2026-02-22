@@ -35,7 +35,6 @@ import type { Address } from "viem";
 import { parseUaidParts } from "../../lib/uaid";
 
 type OrgSettingsTab = "settings" | "operations" | "agent";
-
 type OrgRoleTag = "coalition" | "contributor" | "funding" | "member";
 
 function safeParseJson(input: string | null | undefined): any | null {
@@ -55,7 +54,6 @@ function coerceAgentIdToNumber(value: unknown): number | null {
       return Number.isFinite(n) ? n : null;
     }
     if (typeof value === "string" && value.trim()) {
-      // handle "123" or bigint-like strings
       const trimmed = value.trim();
       const n = trimmed.startsWith("0x") ? Number(BigInt(trimmed)) : Number(trimmed);
       return Number.isFinite(n) ? n : null;
@@ -120,7 +118,14 @@ function getValidationRegistryForChain(chainId: number): string | undefined {
   return process.env.NEXT_PUBLIC_AGENTIC_TRUST_VALIDATION_REGISTRY;
 }
 
-export default function OrganizationSettingsPage() {
+function isCoalitionOrg(org: OrganizationAssociation | null | undefined): boolean {
+  if (!org) return false;
+  const roles = Array.isArray((org as any).org_roles) ? (org as any).org_roles : [];
+  if (roles.includes("coalition")) return true;
+  return false;
+}
+
+export default function CoalitionSettingsPage() {
   const { user } = useConnection();
   const { web3auth } = useWeb3Auth();
   const { defaultOrgAgent } = useDefaultOrgAgent();
@@ -138,7 +143,6 @@ export default function OrganizationSettingsPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
-  // Editable org fields (stored in organizations table via /api/users/organizations).
   const [orgName, setOrgName] = React.useState("");
   const [orgAddress, setOrgAddress] = React.useState("");
   const [orgRoles, setOrgRoles] = React.useState<OrgRoleTag[]>([]);
@@ -169,7 +173,7 @@ export default function OrganizationSettingsPage() {
       return;
     }
     const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
-    const hydrateKey = `${individualId}:${desiredEns}`;
+    const hydrateKey = `${individualId}:${desiredEns}:coalition`;
     if (hydrateKeyRef.current === hydrateKey) return;
 
     const ac = new AbortController();
@@ -179,12 +183,15 @@ export default function OrganizationSettingsPage() {
       try {
         const orgs = await getUserOrganizationsByIndividualId(individualId);
         if (ac.signal.aborted) return;
-        const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
-        const match =
-          desiredEns && orgs.length > 0
-            ? orgs.find((o) => String(o.ens_name || "").toLowerCase() === desiredEns) ?? null
+
+        const coalitionOrgs = orgs.filter((o) => isCoalitionOrg(o));
+        const preferred =
+          desiredEns && coalitionOrgs.length
+            ? coalitionOrgs.find((o) => String(o.ens_name || "").toLowerCase() === desiredEns) ?? null
             : null;
-        const selected = match ?? primary;
+        const primaryCoalition = coalitionOrgs.find((o) => o.is_primary) ?? coalitionOrgs[0] ?? null;
+        const selected = preferred ?? primaryCoalition ?? (orgs.find((o) => o.is_primary) ?? orgs[0] ?? null);
+
         setOrganization(selected);
         setOrgName(selected?.org_name ?? "");
         setOrgAddress(selected?.org_address ?? "");
@@ -194,7 +201,12 @@ export default function OrganizationSettingsPage() {
               .filter(Boolean) as OrgRoleTag[])
           : [];
         setOrgRoles(fromDb);
-        hydrateKeyRef.current = hydrateKey; // cache only after success
+
+        if (!primaryCoalition) {
+          setError("No coalition organization found. Add the 'coalition' role to an organization first.");
+        }
+
+        hydrateKeyRef.current = hydrateKey;
       } catch (e: any) {
         if (e?.name !== "AbortError") setError(e?.message || String(e));
         hydrateKeyRef.current = null;
@@ -205,7 +217,7 @@ export default function OrganizationSettingsPage() {
     return () => {
       ac.abort();
       setLoading(false);
-      hydrateKeyRef.current = null; // allow retry after abort/reconnect
+      hydrateKeyRef.current = null;
     };
   }, [individualId, defaultOrgAgent?.ensName]);
 
@@ -221,17 +233,13 @@ export default function OrganizationSettingsPage() {
     if (!individualId) throw new Error("Missing individualId (profile not hydrated).");
     if (!organization?.ens_name) throw new Error("Missing organization ENS name.");
     const effectiveUaid = typeof organization.uaid === "string" && organization.uaid.trim() ? organization.uaid.trim() : null;
-    if (!effectiveUaid) {
-      throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
-    }
+    if (!effectiveUaid) throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
 
-    // UAID → agent details (contains agentId). This is the canonical hydration path.
     const agentResp = await fetch(`/api/agents/by-uaid/${encodeURIComponent(effectiveUaid)}`);
     const agentData = agentResp.ok ? await agentResp.json().catch(() => null) : null;
     const hydratedAgentId =
       agentData && agentData.found === true ? coerceAgentIdToNumber((agentData as any)?.agentId ?? (agentData as any)?.agent?.agentId ?? null) : null;
 
-    // Persist to organizations + individual_organizations (no email/EOA)
     await upsertUserOrganizationByIndividualId({
       individual_id: individualId,
       ens_name: organization.ens_name,
@@ -246,16 +254,15 @@ export default function OrganizationSettingsPage() {
       role: organization.role ?? null,
     });
 
-    // Refresh local state
     const orgs = await getUserOrganizationsByIndividualId(individualId);
     const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
-    const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
-    const match =
-      desiredEns && orgs.length > 0
-        ? orgs.find((o) => String(o.ens_name || "").toLowerCase() === desiredEns) ?? null
+    const coalitionOrgs = orgs.filter((o) => isCoalitionOrg(o));
+    const preferred =
+      desiredEns && coalitionOrgs.length
+        ? coalitionOrgs.find((o) => String(o.ens_name || "").toLowerCase() === desiredEns) ?? null
         : null;
-    const refreshed = match ?? primary;
-    setOrganization(refreshed);
+    const refreshed = preferred ?? (coalitionOrgs.find((o) => o.is_primary) ?? coalitionOrgs[0] ?? null) ?? null;
+    if (refreshed) setOrganization(refreshed);
 
     return {
       agentId: hydratedAgentId,
@@ -265,14 +272,11 @@ export default function OrganizationSettingsPage() {
     };
   }, [individualId, organization, chainId, defaultOrgAgent?.ensName]);
 
-  // Self-heal: if org row is missing agent identifiers, hydrate from ENS + by-account and upsert.
   React.useEffect(() => {
     if (!organization) return;
     if (!organization.ens_name) return;
-    const needsHydration =
-      organization.agent_row_id == null;
+    const needsHydration = organization.agent_row_id == null;
     if (!needsHydration) return;
-
     if (!individualId) return;
     const resolvedChainId = Number(parseUaidParts(organization.uaid)?.chainId ?? chainId ?? 11155111);
     if (!Number.isFinite(resolvedChainId)) return;
@@ -280,20 +284,14 @@ export default function OrganizationSettingsPage() {
     if (agentHydrateKeyRef.current === key) return;
     agentHydrateKeyRef.current = key;
 
-    let cancelled = false;
     (async () => {
       try {
         await hydrateSelectedOrg();
       } catch (e) {
-        // Don't block page usage; just log.
-        console.warn("[organization-settings] agent hydration failed:", e);
+        console.warn("[coalition-settings] agent hydration failed:", e);
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [individualId, organization, chainId, defaultOrgAgent?.ensName, hydrateSelectedOrg]);
+  }, [individualId, organization, chainId, hydrateSelectedOrg]);
 
   const saveOrganization = React.useCallback(async () => {
     if (!individualId) {
@@ -318,9 +316,7 @@ export default function OrganizationSettingsPage() {
         org_roles: orgRoles,
       };
       const effectiveUaid =
-        typeof updated.uaid === "string" && updated.uaid.trim()
-          ? updated.uaid.trim()
-          : (await hydrateSelectedOrg()).uaid;
+        typeof updated.uaid === "string" && updated.uaid.trim() ? updated.uaid.trim() : (await hydrateSelectedOrg()).uaid;
       await upsertUserOrganizationByIndividualId({
         individual_id: individualId,
         ens_name: updated.ens_name,
@@ -335,163 +331,15 @@ export default function OrganizationSettingsPage() {
         role: updated.role ?? null,
       });
       const orgs = await getUserOrganizationsByIndividualId(individualId);
-      const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
-      setOrganization(primary);
+      const coalitionOrgs = orgs.filter((o) => isCoalitionOrg(o));
+      const primaryCoalition = coalitionOrgs.find((o) => o.is_primary) ?? coalitionOrgs[0] ?? null;
+      setOrganization(primaryCoalition);
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
       setSaving(false);
     }
   }, [individualId, organization, orgName, orgAddress, orgRoles, hydrateSelectedOrg]);
-
-  const handleGenerateSessionPackage = React.useCallback(async () => {
-    setSessionPkg(null);
-    setSessionError(null);
-    if (!ensName) {
-      setSessionError("Missing organization ENS name. Select/set a default org agent first.");
-      return;
-    }
-    if (!walletAddress) {
-      setSessionError("Wallet address is required to generate a session package.");
-      return;
-    }
-    if (!individualId) {
-      setSessionError("Missing individualId (profile not hydrated).");
-      return;
-    }
-    // Web3Auth sometimes restores `connected` state before `provider` is set.
-    // Try to rehydrate provider by calling connect() (should be silent if already connected).
-    if (web3auth && !(web3auth as any).provider && typeof (web3auth as any).connect === "function") {
-      try {
-        await (web3auth as any).connect();
-      } catch {
-        // ignore; we'll still fall back to window.ethereum if present
-      }
-    }
-
-    const eip1193Provider =
-      (web3auth as any)?.provider ?? (typeof window !== "undefined" ? (window as any).ethereum : null);
-    if (!eip1193Provider) {
-      setSessionError("An EIP-1193 provider is required to generate a session package.");
-      return;
-    }
-    try {
-      // Ensure we have a usable agentId (hydrate from KB if needed).
-      let effectiveAgentId = agentId;
-      if (!effectiveAgentId) {
-        try {
-          const hydrated = await hydrateSelectedOrg();
-          effectiveAgentId = hydrated.agentId ?? null;
-        } catch {
-          // ignore; will error below
-        }
-      }
-      if (!effectiveAgentId) {
-        setSessionError("Missing agentId for selected organization agent (unable to hydrate). Re-select the org agent.");
-        return;
-      }
-
-      const owner = walletAddress.toLowerCase() as Address;
-      let aa = (agentAccount as Address | null) ?? null;
-      if (!aa) {
-        const didEns = `did:ens:${chainId}:${ensName}`;
-        const ensResp = await fetch(`/api/names/${encodeURIComponent(didEns)}`);
-        if (!ensResp.ok) {
-          throw new Error("Missing agent smart-account address for selected org (ENS lookup failed).");
-        }
-        const ensData = await ensResp.json().catch(() => null);
-        const resolved = ensData?.nameInfo?.account;
-        if (!resolved || typeof resolved !== "string" || !resolved.startsWith("0x")) {
-          throw new Error("Missing agent smart-account address for selected org.");
-        }
-        aa = resolved.toLowerCase() as Address;
-      }
-
-      // Preflight: ensure the connected EOA is actually an owner of the org smart account.
-      // If this is wrong, the delegation redemption will revert in simulation with an opaque selector.
-      const rpcUrl = getRpcUrlForChain(chainId);
-      if (rpcUrl) {
-        const publicClient = createPublicClient({ transport: http(rpcUrl) });
-        let onchainOwner: string | null = null;
-        try {
-          onchainOwner = (await publicClient.readContract({ address: aa, abi: OWNER_ABI, functionName: "owner" })) as any;
-        } catch {
-          try {
-            onchainOwner = (await publicClient.readContract({ address: aa, abi: GET_OWNER_ABI, functionName: "getOwner" })) as any;
-          } catch {
-            try {
-              const owners = (await publicClient.readContract({ address: aa, abi: OWNERS_ABI, functionName: "owners" })) as any;
-              if (Array.isArray(owners) && owners[0]) onchainOwner = String(owners[0]);
-            } catch {
-              // ignore; not all accounts expose an owner() view
-            }
-          }
-        }
-        if (onchainOwner && typeof onchainOwner === "string" && onchainOwner.toLowerCase() !== owner.toLowerCase()) {
-          throw new Error(
-            `Connected wallet does not own the selected org smart account. Expected owner ${onchainOwner}, connected ${owner}.`,
-          );
-        }
-      }
-
-      const pkg = await generateSessionPackage({
-        agentId: effectiveAgentId,
-        chainId,
-        agentAccount: aa,
-        provider: eip1193Provider,
-        ownerAddress: owner,
-        bundlerUrl: getBundlerUrlForChain(chainId),
-        rpcUrl: getRpcUrlForChain(chainId),
-        identityRegistry: getIdentityRegistryForChain(chainId) as any,
-        reputationRegistry: getReputationRegistryForChain(chainId) as any,
-        validationRegistry: getValidationRegistryForChain(chainId) as any,
-      } as any);
-
-      setSessionPkg(pkg);
-
-      // Persist immediately (org + canonical agents row).
-      if (organization) {
-        const effectiveUaid =
-          typeof organization.uaid === "string" && organization.uaid.trim()
-            ? organization.uaid.trim()
-            : (await hydrateSelectedOrg()).uaid;
-        await upsertUserOrganizationByIndividualId({
-          individual_id: individualId,
-          ens_name: organization.ens_name,
-          agent_name: organization.agent_name,
-          org_name: organization.org_name ?? null,
-          org_address: organization.org_address ?? null,
-          org_roles: Array.isArray((organization as any).org_roles) ? ((organization as any).org_roles as string[]) : null,
-          uaid: effectiveUaid,
-          session_package: JSON.stringify(pkg),
-          org_metadata: organization.org_metadata ?? null,
-          is_primary: organization.is_primary,
-          role: organization.role ?? null,
-        });
-        const orgs = await getUserOrganizationsByIndividualId(individualId);
-        const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
-        const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
-        const match =
-          desiredEns && orgs.length > 0
-            ? orgs.find((o) => String(o.ens_name || "").toLowerCase() === desiredEns) ?? null
-            : null;
-        setOrganization(match ?? primary);
-      }
-    } catch (e: any) {
-      setSessionError(e?.message || String(e));
-    }
-  }, [
-    agentAccount,
-    agentId,
-    chainId,
-    web3auth,
-    walletAddress,
-    organization,
-    defaultOrgAgent?.ensName,
-    ensName,
-    individualId,
-    hydrateSelectedOrg,
-  ]);
 
   const handleGetA2aAgentCardJson = React.useCallback(async () => {
     setAgentCardJson(null);
@@ -501,9 +349,7 @@ export default function OrganizationSettingsPage() {
     try {
       if (!individualId) throw new Error("Missing individualId (profile not hydrated).");
       const effectiveUaid =
-        typeof organization?.uaid === "string" && organization.uaid.trim()
-          ? organization.uaid.trim()
-          : (await hydrateSelectedOrg()).uaid;
+        typeof organization?.uaid === "string" && organization.uaid.trim() ? organization.uaid.trim() : (await hydrateSelectedOrg()).uaid;
       if (!effectiveUaid) throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
 
       const res = await fetch(`/api/agents/a2a-card/${encodeURIComponent(effectiveUaid)}`, { method: "GET" });
@@ -527,9 +373,7 @@ export default function OrganizationSettingsPage() {
     try {
       if (!individualId) throw new Error("Missing individualId (profile not hydrated).");
       const effectiveUaid =
-        typeof organization?.uaid === "string" && organization.uaid.trim()
-          ? organization.uaid.trim()
-          : (await hydrateSelectedOrg()).uaid;
+        typeof organization?.uaid === "string" && organization.uaid.trim() ? organization.uaid.trim() : (await hydrateSelectedOrg()).uaid;
       if (!effectiveUaid) throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
 
       const res = await fetch(`/api/agents/a2a-status/${encodeURIComponent(effectiveUaid)}`, { method: "GET" });
@@ -552,9 +396,7 @@ export default function OrganizationSettingsPage() {
     try {
       if (!individualId) throw new Error("Missing individualId (profile not hydrated).");
       const effectiveUaid =
-        typeof organization?.uaid === "string" && organization.uaid.trim()
-          ? organization.uaid.trim()
-          : (await hydrateSelectedOrg()).uaid;
+        typeof organization?.uaid === "string" && organization.uaid.trim() ? organization.uaid.trim() : (await hydrateSelectedOrg()).uaid;
       if (!effectiveUaid) throw new Error("Missing UAID for selected organization agent (unable to hydrate).");
 
       const key = `${individualId}:${effectiveUaid}`;
@@ -583,63 +425,140 @@ export default function OrganizationSettingsPage() {
     void handleRefreshAgentDetails();
   }, [tab, individualId, organization?.uaid, agentDetails, handleRefreshAgentDetails]);
 
-  const handleSaveSessionPackage = React.useCallback(async () => {
+  const existingSession = safeParseJson(organization?.session_package ?? null);
+
+  const handleGenerateSessionPackage = React.useCallback(async () => {
+    setSessionPkg(null);
+    setSessionError(null);
+    if (!ensName) {
+      setSessionError("Missing organization ENS name. Select/set a default org agent first.");
+      return;
+    }
     if (!walletAddress) {
-      setSessionError("Missing wallet address.");
+      setSessionError("Wallet address is required to generate a session package.");
       return;
     }
     if (!individualId) {
       setSessionError("Missing individualId (profile not hydrated).");
       return;
     }
-    if (!organization) {
-      setSessionError("No organization found.");
+    if (web3auth && !(web3auth as any).provider && typeof (web3auth as any).connect === "function") {
+      try {
+        await (web3auth as any).connect();
+      } catch {
+        // ignore
+      }
+    }
+
+    const eip1193Provider =
+      (web3auth as any)?.provider ?? (typeof window !== "undefined" ? (window as any).ethereum : null);
+    if (!eip1193Provider) {
+      setSessionError("An EIP-1193 provider is required to generate a session package.");
       return;
     }
-    if (!sessionPkg) {
-      setSessionError("No session package generated yet.");
-      return;
-    }
-    setSaving(true);
-    setSessionError(null);
     try {
-      // Persist into organizations + agents tables (route upserts agents row now).
+      let effectiveAgentId = agentId;
+      if (!effectiveAgentId) {
+        const hydrated = await hydrateSelectedOrg();
+        effectiveAgentId = hydrated.agentId ?? null;
+      }
+      if (!effectiveAgentId) {
+        throw new Error("Missing agentId for selected coalition agent. Re-select the org agent (needs an on-chain agentId).");
+      }
+      if (!agentAccount) throw new Error("Missing agent account for selected coalition agent.");
+      const bundlerUrl = getBundlerUrlForChain(chainId);
+      const rpcUrl = getRpcUrlForChain(chainId);
+      const identityRegistry = getIdentityRegistryForChain(chainId);
+      const reputationRegistry = getReputationRegistryForChain(chainId);
+      const validationRegistry = getValidationRegistryForChain(chainId);
+      if (!bundlerUrl || !rpcUrl || !identityRegistry || !reputationRegistry || !validationRegistry) {
+        throw new Error("Missing required Agentic Trust env vars for this chain.");
+      }
+
+      const publicClient = createPublicClient({ transport: http(rpcUrl) });
+      let owner: Address | null = null;
+      try {
+        owner = (await publicClient.readContract({ address: agentAccount as Address, abi: OWNER_ABI, functionName: "owner" })) as Address;
+      } catch {
+        // ignore
+      }
+      if (!owner) {
+        try {
+          owner = (await publicClient.readContract({ address: agentAccount as Address, abi: GET_OWNER_ABI, functionName: "getOwner" })) as Address;
+        } catch {
+          // ignore
+        }
+      }
+      if (!owner) {
+        try {
+          const owners = (await publicClient.readContract({ address: agentAccount as Address, abi: OWNERS_ABI, functionName: "owners" })) as Address[];
+          owner = owners?.[0] ?? null;
+        } catch {
+          // ignore
+        }
+      }
+      if (!owner) throw new Error("Unable to determine AA owner for the selected coalition smart account.");
+
+      const session = await generateSessionPackage({
+        agentId: effectiveAgentId,
+        chainId,
+        agentAccount,
+        ownerAccount: owner,
+        bundlerUrl,
+        rpcUrl,
+        identityRegistry,
+        reputationRegistry,
+        validationRegistry,
+      } as any);
+
+      setSessionPkg(session);
+
+      await upsertUserOrganizationByIndividualId({
+        individual_id: individualId,
+        ens_name: organization?.ens_name ?? ensName,
+        agent_name: organization?.agent_name ?? agentName ?? "coalition",
+        org_name: organization?.org_name ?? null,
+        org_address: organization?.org_address ?? null,
+        org_roles: Array.isArray((organization as any)?.org_roles) ? ((organization as any).org_roles as string[]) : null,
+        uaid: uaid ?? "",
+        session_package: JSON.stringify(session),
+        org_metadata: organization?.org_metadata ?? null,
+        is_primary: organization?.is_primary ?? false,
+        role: organization?.role ?? null,
+      });
+    } catch (e: any) {
+      setSessionError(e?.message || String(e));
+    }
+  }, [agentId, chainId, agentAccount, ensName, walletAddress, web3auth, individualId, hydrateSelectedOrg, organization, agentName, uaid]);
+
+  const handleSaveSessionPackage = React.useCallback(async () => {
+    if (!individualId) return;
+    if (!organization?.ens_name) return;
+    if (!sessionPkg) return;
+    setSaving(true);
+    setError(null);
+    try {
       const effectiveUaid =
-        typeof organization.uaid === "string" && organization.uaid.trim()
-          ? organization.uaid.trim()
-          : (await hydrateSelectedOrg()).uaid;
+        typeof organization.uaid === "string" && organization.uaid.trim() ? organization.uaid.trim() : (await hydrateSelectedOrg()).uaid;
       await upsertUserOrganizationByIndividualId({
         individual_id: individualId,
         ens_name: organization.ens_name,
         agent_name: organization.agent_name,
         org_name: organization.org_name ?? null,
         org_address: organization.org_address ?? null,
-        org_roles: Array.isArray((organization as any).org_roles) ? ((organization as any).org_roles as string[]) : null,
+        org_roles: Array.isArray((organization as any)?.org_roles) ? ((organization as any).org_roles as string[]) : null,
         uaid: effectiveUaid,
         session_package: JSON.stringify(sessionPkg),
         org_metadata: organization.org_metadata ?? null,
         is_primary: organization.is_primary,
         role: organization.role ?? null,
       });
-      const orgs = await getUserOrganizationsByIndividualId(individualId);
-      const desiredEns = typeof defaultOrgAgent?.ensName === "string" ? defaultOrgAgent.ensName.toLowerCase() : "";
-      const primary = orgs.find((o) => o.is_primary) ?? orgs[0] ?? null;
-      const match =
-        desiredEns && orgs.length > 0
-          ? orgs.find((o) => String(o.ens_name || "").toLowerCase() === desiredEns) ?? null
-          : null;
-      setOrganization(match ?? primary);
     } catch (e: any) {
-      setSessionError(e?.message || String(e));
+      setError(e?.message || String(e));
     } finally {
       setSaving(false);
     }
-  }, [walletAddress, individualId, organization, sessionPkg, agentAccount, chainId, defaultOrgAgent?.ensName]);
-
-  const existingSession = React.useMemo(() => {
-    const raw = organization?.session_package ?? null;
-    return safeParseJson(raw);
-  }, [organization?.session_package]);
+  }, [individualId, organization, sessionPkg, hydrateSelectedOrg]);
 
   return (
     <main>
@@ -647,10 +566,10 @@ export default function OrganizationSettingsPage() {
         <Stack spacing={2.5}>
           <Box>
             <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: -0.3 }}>
-              Organization Settings
+              Coalition Settings
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Manage your selected organization agent and operations.
+              Manage your coalition organization agent (Organization, Operations, Agent).
             </Typography>
           </Box>
 
@@ -660,13 +579,13 @@ export default function OrganizationSettingsPage() {
             </Alert>
           ) : null}
 
-          {error ? <Alert severity="error">{error}</Alert> : null}
+          {error ? <Alert severity={error.includes("No coalition") ? "warning" : "error"}>{error}</Alert> : null}
 
           <Card variant="outlined" sx={{ borderRadius: 3 }}>
             <CardContent>
               <Grid container spacing={2}>
                 <Grid item xs={12} md={7}>
-                  <Typography sx={{ fontWeight: 800, mb: 0.5 }}>Selected organization agent</Typography>
+                  <Typography sx={{ fontWeight: 800, mb: 0.5 }}>Selected coalition organization agent</Typography>
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                     <Chip label={agentName ?? "—"} />
                     <Chip label={`chain ${chainId}`} variant="outlined" />
@@ -678,11 +597,14 @@ export default function OrganizationSettingsPage() {
                 </Grid>
                 <Grid item xs={12} md={5}>
                   <Stack direction="row" spacing={1} justifyContent={{ xs: "flex-start", md: "flex-end" }}>
-                    <Button component={Link} href="/dashboard" variant="outlined">
-                      Dashboard
+                    <Button component={Link} href="/app" variant="outlined">
+                      Workspace
                     </Button>
                     <Button component={Link} href="/agents" variant="outlined">
                       Agent Registry
+                    </Button>
+                    <Button component={Link} href="/organization-settings" variant="outlined">
+                      Org Settings
                     </Button>
                   </Stack>
                 </Grid>
@@ -706,18 +628,8 @@ export default function OrganizationSettingsPage() {
                 </Typography>
               ) : tab === "settings" ? (
                 <Stack spacing={2}>
-                  <TextField
-                    label="Organization name"
-                    value={orgName}
-                    onChange={(e) => setOrgName(e.target.value)}
-                    fullWidth
-                  />
-                  <TextField
-                    label="Organization address"
-                    value={orgAddress}
-                    onChange={(e) => setOrgAddress(e.target.value)}
-                    fullWidth
-                  />
+                  <TextField label="Organization name" value={orgName} onChange={(e) => setOrgName(e.target.value)} fullWidth />
+                  <TextField label="Organization address" value={orgAddress} onChange={(e) => setOrgAddress(e.target.value)} fullWidth />
 
                   <Card variant="outlined" sx={{ borderRadius: 2 }}>
                     <CardContent>
@@ -772,7 +684,7 @@ export default function OrganizationSettingsPage() {
                 <Stack spacing={2}>
                   <Typography sx={{ fontWeight: 800 }}>Agent information</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    UAID is canonical. This view hydrates agent details by UAID (like the admin app agent details page).
+                    UAID is canonical. This view hydrates agent details by UAID.
                   </Typography>
 
                   {agentDetailsError ? <Alert severity="error">{agentDetailsError}</Alert> : null}
@@ -781,18 +693,10 @@ export default function OrganizationSettingsPage() {
                   {a2aStatusResult ? <Alert severity="success">A2A status: success</Alert> : null}
 
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    <Button
-                      variant="contained"
-                      onClick={() => void handleRefreshAgentDetails()}
-                      disabled={saving || agentDetailsLoading}
-                    >
+                    <Button variant="contained" onClick={() => void handleRefreshAgentDetails()} disabled={saving || agentDetailsLoading}>
                       {agentDetailsLoading ? "Refreshing…" : "Refresh agent info"}
                     </Button>
-                    <Button
-                      variant="outlined"
-                      onClick={() => void handleGetA2aAgentCardJson()}
-                      disabled={saving || agentCardLoading}
-                    >
+                    <Button variant="outlined" onClick={() => void handleGetA2aAgentCardJson()} disabled={saving || agentCardLoading}>
                       {agentCardLoading ? "Fetching agent card…" : "Get A2A agent card JSON"}
                     </Button>
                     <Button variant="outlined" onClick={() => void handleCheckA2aStatus()} disabled={saving || a2aStatusLoading}>
@@ -853,21 +757,13 @@ export default function OrganizationSettingsPage() {
                     <Button variant="contained" onClick={() => void handleGenerateSessionPackage()} disabled={saving}>
                       Generate + save session package
                     </Button>
-                    <Button
-                      variant="outlined"
-                      onClick={() => void handleGetA2aAgentCardJson()}
-                      disabled={saving || agentCardLoading}
-                    >
+                    <Button variant="outlined" onClick={() => void handleGetA2aAgentCardJson()} disabled={saving || agentCardLoading}>
                       {agentCardLoading ? "Fetching agent card…" : "Get A2A agent card JSON"}
                     </Button>
                     <Button variant="outlined" onClick={() => void handleCheckA2aStatus()} disabled={saving || a2aStatusLoading}>
                       {a2aStatusLoading ? "Checking status…" : "Check A2A status"}
                     </Button>
-                    <Button
-                      variant="outlined"
-                      onClick={() => void handleSaveSessionPackage()}
-                      disabled={saving || !sessionPkg}
-                    >
+                    <Button variant="outlined" onClick={() => void handleSaveSessionPackage()} disabled={saving || !sessionPkg}>
                       Save to agent record
                     </Button>
                   </Stack>

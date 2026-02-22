@@ -292,7 +292,7 @@ export default function ApplicationEnvironmentPage() {
       setErr(null);
       (async () => {
         try {
-          const list = await listInitiatives(individualId, scope, ac.signal);
+          const list = await listInitiatives(individualId, scope, undefined, ac.signal);
           setRows(list);
         } catch (e: any) {
           if (e?.name !== "AbortError") setErr(e?.message || String(e));
@@ -390,11 +390,166 @@ export default function ApplicationEnvironmentPage() {
     );
   }
 
+  function ProposedInitiativesView() {
+    const coalitionOrgs = React.useMemo(() => {
+      return (orgs || []).filter((o: any) => {
+        const roles = Array.isArray((o as any).org_roles) ? (o as any).org_roles : [];
+        if (roles.includes("coalition")) return true;
+        return false;
+      });
+    }, [orgs]);
+
+    const defaultCoalitionOrgId = React.useMemo(() => {
+      const id = typeof primaryOrg?.id === "number" ? primaryOrg.id : null;
+      if (!id) return null;
+      const roles = Array.isArray((primaryOrg as any)?.org_roles) ? (primaryOrg as any).org_roles : [];
+      if (roles.includes("coalition")) return id;
+      return coalitionOrgs.length === 1 && typeof (coalitionOrgs[0] as any)?.id === "number" ? (coalitionOrgs[0] as any).id : null;
+    }, [primaryOrg, coalitionOrgs]);
+
+    const [coalitionOrgId, setCoalitionOrgId] = React.useState<number | "">(defaultCoalitionOrgId ?? "");
+    const [rows, setRows] = React.useState<InitiativeRow[]>([]);
+    const [loadingRows, setLoadingRows] = React.useState(false);
+    const [err, setErr] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+      if (!individualId) {
+        setRows([]);
+        setLoadingRows(false);
+        return;
+      }
+      if (!coalitionOrgId) {
+        setRows([]);
+        setLoadingRows(false);
+        return;
+      }
+      const ac = new AbortController();
+      setLoadingRows(true);
+      setErr(null);
+      (async () => {
+        try {
+          const list = await listInitiatives(
+            individualId,
+            "all",
+            { state: "draft", coalitionOrgId: typeof coalitionOrgId === "number" ? coalitionOrgId : null },
+            ac.signal,
+          );
+          setRows(list);
+        } catch (e: any) {
+          if (e?.name !== "AbortError") setErr(e?.message || String(e));
+        } finally {
+          setLoadingRows(false);
+        }
+      })();
+      return () => {
+        ac.abort();
+        setLoadingRows(false);
+      };
+    }, [individualId, coalitionOrgId]);
+
+    return (
+      <Card variant="outlined" sx={{ borderRadius: 3 }}>
+        <CardContent>
+          <Stack spacing={1.25}>
+            <Typography sx={{ fontWeight: 800 }}>Proposed Initiatives</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Draft initiatives tagged to a coalition organization.
+            </Typography>
+
+            {coalitionOrgs.length === 0 ? (
+              <Alert severity="info">No coalition organizations found for your profile.</Alert>
+            ) : (
+              <TextField
+                label="Coalition organization"
+                select
+                value={coalitionOrgId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const n = v ? Number.parseInt(String(v), 10) : NaN;
+                  setCoalitionOrgId(Number.isFinite(n) ? n : "");
+                }}
+                SelectProps={{ native: true }}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              >
+                <option value="">Select a coalition…</option>
+                {coalitionOrgs.map((o: any) => (
+                  <option key={String(o.id)} value={String(o.id)}>
+                    {o.org_name || o.ens_name || `Org #${o.id}`}
+                  </option>
+                ))}
+              </TextField>
+            )}
+
+            {err ? <Alert severity="error">{err}</Alert> : null}
+            {loadingRows ? (
+              <Box sx={{ py: 2, display: "flex", justifyContent: "center" }}>
+                <CircularProgress size={22} />
+              </Box>
+            ) : rows.length === 0 ? (
+              <Alert severity="info">No proposed initiatives found.</Alert>
+            ) : (
+              <Stack spacing={1}>
+                {rows.map((it) => (
+                  <Card key={it.id} variant="outlined" sx={{ borderRadius: 2 }}>
+                    <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+                      <Stack
+                        direction={{ xs: "column", sm: "row" }}
+                        spacing={1}
+                        alignItems={{ sm: "center" }}
+                        justifyContent="space-between"
+                      >
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography sx={{ fontWeight: 800, lineHeight: 1.2 }}>{it.title}</Typography>
+                          {it.summary ? (
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                              {it.summary}
+                            </Typography>
+                          ) : null}
+                          <Stack direction="row" spacing={1} sx={{ mt: 0.75 }} flexWrap="wrap" useFlexGap>
+                            <Chip size="small" label={`#${it.id}`} variant="outlined" />
+                            <Chip size="small" label={stateLabel(it.state)} color="primary" />
+                          </Stack>
+                        </Box>
+                        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                          <Button
+                            component={Link}
+                            href={`/app?view=initiative-dashboard&initiativeId=${encodeURIComponent(String(it.id))}`}
+                            variant="contained"
+                            size="small"
+                          >
+                            Open
+                          </Button>
+                        </Stack>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Stack>
+            )}
+          </Stack>
+        </CardContent>
+      </Card>
+    );
+  }
+
   function CreateInitiativeView() {
     const [title, setTitle] = React.useState("");
     const [summary, setSummary] = React.useState("");
     const [state, setState] = React.useState<InitiativeState>("draft");
     const [includePrimaryOrg, setIncludePrimaryOrg] = React.useState(true);
+    const coalitionOrgs = React.useMemo(() => {
+      return (orgs || []).filter((o: any) => {
+        const roles = Array.isArray((o as any).org_roles) ? (o as any).org_roles : [];
+        const normalized = roles
+          .map((r: any) => (typeof r === "string" ? r.trim().toLowerCase() : ""))
+          .filter(Boolean);
+        if (normalized.includes("coalition")) return true;
+        return false;
+      });
+    }, [orgs]);
+    const [coalitionOrgIds, setCoalitionOrgIds] = React.useState<number[]>([]);
+    const [refreshingOrgs, setRefreshingOrgs] = React.useState(false);
     const [submitting, setSubmitting] = React.useState(false);
     const [err, setErr] = React.useState<string | null>(null);
 
@@ -459,6 +614,67 @@ export default function ApplicationEnvironmentPage() {
               )}
             </Box>
 
+            <Card variant="outlined" sx={{ borderRadius: 2 }}>
+              <CardContent>
+                <Typography sx={{ fontWeight: 800, mb: 0.5 }}>Coalition org tags</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Select one or more coalition organizations to tag this initiative.
+                </Typography>
+                {coalitionOrgs.length === 0 ? (
+                  <Alert
+                    severity="info"
+                    action={
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={refreshingOrgs || !individualId}
+                        onClick={async () => {
+                          if (!individualId) return;
+                          try {
+                            setRefreshingOrgs(true);
+                            const orgList = await getUserOrganizationsByIndividualId(individualId);
+                            setOrgs(orgList);
+                          } finally {
+                            setRefreshingOrgs(false);
+                          }
+                        }}
+                      >
+                        {refreshingOrgs ? "Refreshing…" : "Refresh organizations"}
+                      </Button>
+                    }
+                  >
+                    No coalition organizations available to tag. Make sure your organization has the <strong>coalition</strong> role in{" "}
+                    <Link href="/organization-settings">Organization Settings</Link> or <Link href="/coalition-settings">Coalition Settings</Link>.
+                  </Alert>
+                ) : (
+                  <Stack spacing={0.5}>
+                    {coalitionOrgs.map((o: any) => {
+                      const id = typeof o.id === "number" ? o.id : null;
+                      if (!id) return null;
+                      const checked = coalitionOrgIds.includes(id);
+                      return (
+                        <label key={String(id)} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              setCoalitionOrgIds((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(id);
+                                else next.delete(id);
+                                return Array.from(next);
+                              });
+                            }}
+                          />
+                          <span>{o.org_name || o.ens_name || `Org #${id}`}</span>
+                        </label>
+                      );
+                    })}
+                  </Stack>
+                )}
+              </CardContent>
+            </Card>
+
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button
                 variant="contained"
@@ -474,6 +690,7 @@ export default function ApplicationEnvironmentPage() {
                       state,
                       created_by_individual_id: individualId,
                       created_by_org_id: includePrimaryOrg ? primaryOrgId : null,
+                      coalition_org_ids: coalitionOrgIds.length ? coalitionOrgIds : undefined,
                       initial_participants:
                         includePrimaryOrg && primaryOrgId
                           ? [
@@ -1181,6 +1398,8 @@ export default function ApplicationEnvironmentPage() {
                 <InitiativeDashboardView initiativeId={initiativeId} />
               ) : view === "active-initiatives" ? (
                 <InitiativesList title="Active Initiatives" scope="active" />
+              ) : view === "proposed-initiatives" ? (
+                <ProposedInitiativesView />
               ) : view === "create-initiative" ? (
                 <CreateInitiativeView />
               ) : view === "my-initiatives" ? (

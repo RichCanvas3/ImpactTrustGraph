@@ -30,16 +30,11 @@ import {
 import { useDefaultOrgAgent, type DefaultOrgAgent } from "../../components/useDefaultOrgAgent";
 import { OrgAgentSelector } from "../../components/OrgAgentSelector";
 
-type OrgType =
-  | "organization"
-  | "coalition"
-  | "contributor"
-  | "funder";
+type OrgRoleTag = "coalition" | "contributor" | "funding" | "member";
 
 interface OrgDetails {
   name: string;
   address: string;
-  type: OrgType | "";
 }
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6;
@@ -64,8 +59,8 @@ export default function OnboardingPage() {
   const [org, setOrg] = React.useState<OrgDetails>({
     name: "",
     address: "",
-    type: ""
   });
+  const [orgRoles, setOrgRoles] = React.useState<OrgRoleTag[]>([]);
   const [itg, setItg] = React.useState<string | null>(null);
   const [walletAddress, setWalletAddress] = React.useState<string | null>(null);
   const [aaAddress, setAaAddress] = React.useState<string | null>(null);
@@ -137,13 +132,8 @@ export default function OnboardingPage() {
 
   // Helpful defaults by role.
   React.useEffect(() => {
-    setOrg((prev) => {
-      if (prev.type) return prev;
-      if (effectiveRole === "coordinator") return { ...prev, type: "coalition" };
-      if (effectiveRole === "contributor") return { ...prev, type: "contributor" };
-      if (effectiveRole === "funder") return { ...prev, type: "funder" };
-      return prev;
-    });
+    // org type was removed; no-op (roles are selected explicitly below).
+    setOrg((prev) => prev);
   }, [effectiveRole]);
 
   // Participant agent (created for the individual onboarding)
@@ -866,7 +856,6 @@ export default function OnboardingPage() {
             agent_name: agentName,
             org_name: agent?.name || undefined,
             org_address: undefined,
-            org_type: undefined,
             email_domain: emailDomain ?? "unknown",
             uaid: effectiveUaid,
             is_primary: false,
@@ -880,7 +869,6 @@ export default function OnboardingPage() {
               agent_name: agentName,
               org_name: agent?.name || undefined,
               org_address: undefined,
-              org_type: undefined,
               email_domain: emailDomain ?? "unknown",
               uaid: effectiveUaid,
               is_primary: false,
@@ -1082,8 +1070,12 @@ export default function OnboardingPage() {
   ]);
 
   const handleOrgNext = React.useCallback(async () => {
-    if (!org.name || !org.address || !org.type) {
+    if (!org.name || !org.address) {
       setError("Please complete all organization fields before continuing.");
+      return;
+    }
+    if (!Array.isArray(orgRoles) || orgRoles.length === 0) {
+      setError("Select at least one organizational role (coalition, contributor, funding, member).");
       return;
     }
 
@@ -1167,8 +1159,7 @@ export default function OnboardingPage() {
       setUser(null);
       setOrg({
         name: "",
-        address: "",
-        type: ""
+        address: ""
       });
       setItg(null);
       setWalletAddress(null);
@@ -1487,7 +1478,7 @@ export default function OnboardingPage() {
             agent_name: agentName,
             org_name: org.name || undefined,
             org_address: org.address || undefined,
-            org_type: org.type || undefined,
+            org_roles: orgRoles,
             email_domain: emailDomain ?? "unknown",
             uaid: hydratedOrgUaid,
             org_metadata: (() => {
@@ -1584,7 +1575,7 @@ export default function OnboardingPage() {
     isValidAgentName,
     org.name,
     org.address,
-    org.type,
+    orgRoles,
     web3auth,
     user?.email,
     setDefaultOrgAgent,
@@ -2541,29 +2532,46 @@ export default function OnboardingPage() {
               />
             </label>
 
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span>Organization type</span>
-              <select
-                value={org.type}
-                onChange={(e) =>
-                  handleOrgChange("type", e.target.value as OrgType | "")
-                }
-                style={{
-                  padding: "0.5rem 0.75rem",
-                  borderRadius: "0.5rem",
-                  border: "1px solid #cbd5f5"
-                }}
-              >
-                <option value="">Select a type…</option>
-                <option value="organization">
-                  Organization
-                </option>
-                <option value="coalition">Coalition</option>
-                <option value="contributor">Contributor</option>
-                <option value="funder">Funder / Grantmaker</option>
-                
-              </select>
-            </label>
+            <div
+              style={{
+                padding: "1rem",
+                borderRadius: "0.5rem",
+                backgroundColor: "#f8fafc",
+                border: "1px solid #e2e8f0",
+              }}
+            >
+              <div style={{ marginBottom: "0.75rem", fontWeight: 600, fontSize: "0.9rem" }}>
+                Organizational roles (required)
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                {([
+                  { id: "coalition", label: "Coalition org" },
+                  { id: "contributor", label: "Contributor org" },
+                  { id: "funding", label: "Funding org" },
+                  { id: "member", label: "Member org" },
+                ] as const).map((opt) => {
+                  const checked = orgRoles.includes(opt.id);
+                  return (
+                    <label key={opt.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const next = new Set(orgRoles);
+                          if (e.target.checked) next.add(opt.id);
+                          else next.delete(opt.id);
+                          setOrgRoles(Array.from(next));
+                        }}
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#6b7280" }}>
+                Choose one or more roles for this organization. These are used for coalition-tagging initiatives.
+              </div>
+            </div>
 
             {effectiveRole === "org-admin" && (
               <div
@@ -2815,18 +2823,6 @@ export default function OnboardingPage() {
                     <span>{org.address}</span>
                   </div>
             )}
-                {org.type && (
-                  <div style={{ marginTop: "0.5rem" }}>
-                    <strong style={{ color: "#1e40af" }}>Organization Type:</strong>{" "}
-                    <span>
-              {org.type === "organization"
-                ? "Operational Relief Organization"
-                : org.type === "contributor"
-                  ? "Organization"
-                  : "Coalition"}
-                    </span>
-                  </div>
-                )}
                 {emailDomain && (
                   <div style={{ marginTop: "0.5rem", fontSize: "0.9rem", color: "#64748b" }}>
                     <strong>Email Domain:</strong> {emailDomain}

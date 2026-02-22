@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import type { D1Database } from '../../../../lib/db';
 import { getD1Database } from '../../../../lib/d1-wrapper';
+import { canonicalizeUaid } from '../../../../lib/uaid';
 
 /**
  * GET /api/users/organizations?individualId=... or ?eoa=... or ?email=...
@@ -46,6 +47,27 @@ async function ensureOrganizationsSchema(db: D1Database) {
       } catch {
         // ignore
       }
+    }
+
+    // Multi-role org tagging table (idempotent)
+    try {
+      await db
+        .prepare(
+          `CREATE TABLE IF NOT EXISTS organization_roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            organization_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+            UNIQUE(organization_id, role)
+          );`,
+        )
+        .run();
+      await db.prepare("CREATE INDEX IF NOT EXISTS idx_organization_roles_org ON organization_roles(organization_id)").run();
+      await db.prepare("CREATE INDEX IF NOT EXISTS idx_organization_roles_role ON organization_roles(role)").run();
+    } catch {
+      // ignore
     }
   })();
   return ensureOrganizationsSchemaPromise;
@@ -155,7 +177,6 @@ export async function GET(request: NextRequest) {
       agent_name: string;
       org_name: string | null;
       org_address: string | null;
-      org_type: string | null;
       email_domain: string;
       is_primary: number; // SQLite stores boolean as 0/1
       role: string | null;
@@ -167,7 +188,6 @@ export async function GET(request: NextRequest) {
       agent_name: row.agent_name,
       org_name: row.org_name,
       org_address: row.org_address,
-      org_type: row.org_type,
       email_domain: row.email_domain,
       uaid: (row as any).uaid ?? null,
       agent_row_id: (row as any).agent_row_id ?? null,
@@ -177,7 +197,40 @@ export async function GET(request: NextRequest) {
       role: row.role,
     }));
 
-    return NextResponse.json({ organizations });
+    // Attach org_roles[] (best-effort)
+    const orgIds = organizations
+      .map((o) => (typeof o.id === "number" ? o.id : null))
+      .filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+    const rolesByOrgId = new Map<number, string[]>();
+    if (orgIds.length) {
+      try {
+        const roleRows = await db
+          .prepare(
+            `SELECT organization_id, role
+             FROM organization_roles
+             WHERE organization_id IN (${orgIds.map(() => "?").join(",")})`,
+          )
+          .bind(...orgIds)
+          .all<{ organization_id: number; role: string }>();
+        for (const r of roleRows.results || []) {
+          const id = Number(r.organization_id);
+          const roleValue = typeof r.role === "string" ? r.role : "";
+          if (!Number.isFinite(id) || !roleValue) continue;
+          const arr = rolesByOrgId.get(id) ?? [];
+          arr.push(roleValue);
+          rolesByOrgId.set(id, arr);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return NextResponse.json({
+      organizations: organizations.map((o) => ({
+        ...o,
+        org_roles: typeof o.id === "number" ? rolesByOrgId.get(o.id) ?? [] : [],
+      })),
+    });
   } catch (error) {
     console.error('[users/organizations] Error:', error);
     return NextResponse.json(
@@ -203,7 +256,7 @@ export async function POST(request: NextRequest) {
       agent_name,
       org_name,
       org_address,
-      org_type,
+      org_roles,
       email_domain,
       uaid,
       session_package,
@@ -228,8 +281,9 @@ export async function POST(request: NextRequest) {
     const cleanedEoa =
       typeof eoa_address === "string" && /^0x[a-fA-F0-9]{40}$/.test(eoa_address) ? eoa_address : null;
     const uaidValue = typeof uaid === "string" && uaid.trim() ? uaid.trim() : null;
+    const uaidCanonical = canonicalizeUaid(uaidValue);
 
-    if (!individualIdFromBody || !ens_name || !agent_name || !uaidValue) {
+    if (!individualIdFromBody || !ens_name || !agent_name || !uaidValue || !uaidCanonical) {
       return NextResponse.json(
         { error: 'Missing required fields: (individualId), ens_name, agent_name, uaid' },
         { status: 400 }
@@ -300,22 +354,45 @@ export async function POST(request: NextRequest) {
       // Upsert canonical agents row (UAID-only) and capture id for FK.
       let agentRowId: number | null = null;
       try {
-        const existingAgent = await db
+        const existingAgentExact = await db
           .prepare("SELECT id FROM agents WHERE uaid = ?")
-          .bind(uaidValue)
+          .bind(uaidCanonical)
           .first<{ id: number }>();
+
+        const existingAgent =
+          existingAgentExact?.id
+            ? existingAgentExact
+            : await db
+                .prepare(
+                  `SELECT id FROM agents
+                   WHERE ('uaid:' || lower(
+                     CASE
+                       WHEN instr(CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END, ';') > 0
+                         THEN substr(CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END, 1,
+                                     instr(CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END, ';') - 1)
+                       ELSE CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END
+                     END
+                   )) = ?
+                   ORDER BY updated_at DESC, id DESC
+                   LIMIT 1`,
+                )
+                .bind(uaidCanonical)
+                .first<{ id: number }>();
         if (existingAgent?.id) {
           await db.prepare(
             `UPDATE agents
              SET uaid = ?,
-                 ens_name = COALESCE(?, ens_name),
-                 agent_name = COALESCE(?, agent_name),
-                 email_domain = COALESCE(?, email_domain),
+                 ens_name = CASE WHEN ens_name IS NULL OR ens_name = '' THEN ? ELSE ens_name END,
+                 agent_name = CASE WHEN agent_name IS NULL OR agent_name = '' THEN ? ELSE agent_name END,
+                 email_domain = CASE
+                   WHEN email_domain IS NULL OR email_domain = '' OR lower(email_domain) = 'unknown' THEN ?
+                   ELSE email_domain
+                 END,
                  session_package = COALESCE(?, session_package),
                  updated_at = ?
              WHERE id = ?`,
           ).bind(
-            uaidValue,
+            uaidCanonical,
             ens_name,
             agent_name,
             resolvedEmailDomain,
@@ -330,7 +407,7 @@ export async function POST(request: NextRequest) {
              (uaid, ens_name, agent_name, email_domain, session_package, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
           ).bind(
-            uaidValue,
+            uaidCanonical,
             ens_name,
             agent_name,
             resolvedEmailDomain,
@@ -346,17 +423,16 @@ export async function POST(request: NextRequest) {
 
       const insertResult = await db.prepare(
         `INSERT INTO organizations 
-         (ens_name, agent_name, org_name, org_address, org_type, email_domain, 
+         (ens_name, agent_name, org_name, org_address, email_domain, 
           uaid, agent_row_id, session_package, org_metadata, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         ens_name,
         agent_name,
         org_name || null,
         org_address || null,
-        org_type || null,
         resolvedEmailDomain,
-        uaidValue,
+        uaidCanonical,
         agentRowId,
         typeof session_package === "string" ? session_package : null,
         typeof org_metadata === "string" ? org_metadata : null,
@@ -372,22 +448,45 @@ export async function POST(request: NextRequest) {
       // Upsert canonical agents row (UAID-only) and capture id for FK.
       let agentRowId: number | null = null;
       try {
-        const existingAgent = await db
+        const existingAgentExact = await db
           .prepare("SELECT id FROM agents WHERE uaid = ?")
-          .bind(uaidValue)
+          .bind(uaidCanonical)
           .first<{ id: number }>();
+
+        const existingAgent =
+          existingAgentExact?.id
+            ? existingAgentExact
+            : await db
+                .prepare(
+                  `SELECT id FROM agents
+                   WHERE ('uaid:' || lower(
+                     CASE
+                       WHEN instr(CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END, ';') > 0
+                         THEN substr(CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END, 1,
+                                     instr(CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END, ';') - 1)
+                       ELSE CASE WHEN uaid LIKE 'uaid:%' THEN substr(uaid, 6) ELSE uaid END
+                     END
+                   )) = ?
+                   ORDER BY updated_at DESC, id DESC
+                   LIMIT 1`,
+                )
+                .bind(uaidCanonical)
+                .first<{ id: number }>();
         if (existingAgent?.id) {
           await db.prepare(
             `UPDATE agents
              SET uaid = ?,
-                 ens_name = COALESCE(?, ens_name),
-                 agent_name = COALESCE(?, agent_name),
-                 email_domain = COALESCE(?, email_domain),
+                 ens_name = CASE WHEN ens_name IS NULL OR ens_name = '' THEN ? ELSE ens_name END,
+                 agent_name = CASE WHEN agent_name IS NULL OR agent_name = '' THEN ? ELSE agent_name END,
+                 email_domain = CASE
+                   WHEN email_domain IS NULL OR email_domain = '' OR lower(email_domain) = 'unknown' THEN ?
+                   ELSE email_domain
+                 END,
                  session_package = COALESCE(?, session_package),
                  updated_at = ?
              WHERE id = ?`,
           ).bind(
-            uaidValue,
+            uaidCanonical,
             ens_name,
             agent_name,
             resolvedEmailDomain,
@@ -402,7 +501,7 @@ export async function POST(request: NextRequest) {
              (uaid, ens_name, agent_name, email_domain, session_package, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
           ).bind(
-            uaidValue,
+            uaidCanonical,
             ens_name,
             agent_name,
             resolvedEmailDomain,
@@ -418,7 +517,7 @@ export async function POST(request: NextRequest) {
 
       await db.prepare(
         `UPDATE organizations 
-         SET agent_name = ?, org_name = ?, org_address = ?, org_type = ?, 
+         SET agent_name = ?, org_name = ?, org_address = ?, 
              uaid = ?, agent_row_id = COALESCE(?, agent_row_id),
              session_package = COALESCE(?, session_package),
              org_metadata = COALESCE(?, org_metadata), updated_at = ?
@@ -427,14 +526,41 @@ export async function POST(request: NextRequest) {
         agent_name,
         org_name || null,
         org_address || null,
-        org_type || null,
-        uaidValue,
+        uaidCanonical,
         agentRowId,
         typeof session_package === "string" ? session_package : null,
         typeof org_metadata === "string" ? org_metadata : null,
         now,
         ens_name,
       ).run();
+    }
+
+    // Persist organization roles (best-effort, optional)
+    // IMPORTANT: only replace roles when `org_roles` is explicitly provided.
+    if (Array.isArray(org_roles)) {
+      try {
+        const allowedRoles = new Set(["coalition", "contributor", "funding", "member"]);
+        const incomingRoles = (org_roles
+          .map((r) => (typeof r === "string" ? r.trim().toLowerCase() : ""))
+          .filter((r) => allowedRoles.has(r)) as string[]);
+        await db.prepare("DELETE FROM organization_roles WHERE organization_id = ?").bind(organization.id).run();
+        const nowTs = Math.floor(Date.now() / 1000);
+        for (const r of incomingRoles) {
+          try {
+            await db
+              .prepare(
+                `INSERT OR IGNORE INTO organization_roles (organization_id, role, created_at, updated_at)
+                 VALUES (?, ?, ?, ?)`,
+              )
+              .bind(organization.id, r, nowTs, nowTs)
+              .run();
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
 
     // Self-heal: if the individual already has a participant UAID, ensure it's present in agents.
@@ -444,19 +570,20 @@ export async function POST(request: NextRequest) {
         .bind(individual.id)
         .first<{ participant_uaid: string | null; participant_ens_name: string | null; participant_agent_name: string | null }>();
       const pUaid = typeof p?.participant_uaid === "string" && p.participant_uaid.trim() ? p.participant_uaid.trim() : null;
-      if (pUaid) {
-        const existing = await db.prepare("SELECT id FROM agents WHERE uaid = ?").bind(pUaid).first<{ id: number }>();
+      const pUaidCanonical = canonicalizeUaid(pUaid);
+      if (pUaid && pUaidCanonical) {
+        const existing = await db.prepare("SELECT id FROM agents WHERE uaid = ?").bind(pUaidCanonical).first<{ id: number }>();
         const nowTs = Math.floor(Date.now() / 1000);
         if (existing?.id) {
           await db.prepare(
             `UPDATE agents
              SET uaid = ?,
-                 ens_name = COALESCE(?, ens_name),
-                 agent_name = COALESCE(?, agent_name),
+                 ens_name = CASE WHEN ens_name IS NULL OR ens_name = '' THEN ? ELSE ens_name END,
+                 agent_name = CASE WHEN agent_name IS NULL OR agent_name = '' THEN ? ELSE agent_name END,
                  updated_at = ?
              WHERE id = ?`,
           ).bind(
-            pUaid,
+            pUaidCanonical,
             p?.participant_ens_name ?? null,
             p?.participant_agent_name ?? null,
             nowTs,
@@ -468,7 +595,7 @@ export async function POST(request: NextRequest) {
              (uaid, ens_name, agent_name, email_domain, session_package, created_at, updated_at)
              VALUES (?, ?, ?, ?, NULL, ?, ?)`,
           ).bind(
-            pUaid,
+            pUaidCanonical,
             p?.participant_ens_name ?? null,
             p?.participant_agent_name ?? null,
             "unknown",

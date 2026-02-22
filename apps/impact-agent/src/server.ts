@@ -408,7 +408,6 @@ app.get('/.well-known/agent-card.json', async (c) => {
         if (orgData) {
           console.log('[Agent Card] Found organization in D1:', {
             org_name: orgData.org_name,
-            org_type: orgData.org_type,
             email_domain: orgData.email_domain,
             has_session_package: !!orgData.session_package,
           });
@@ -445,9 +444,7 @@ app.get('/.well-known/agent-card.json', async (c) => {
     });
 
     const displayName = orgData?.org_name || agentName;
-    const description = orgData?.org_type
-      ? `${displayName} - ${orgData.org_type} organization`
-      : `${displayName} - Impact Agent`;
+    const description = `${displayName} - Impact Agent`;
 
     const url = new URL(c.req.url);
     const baseUrl = `${url.protocol}//${url.host}`;
@@ -598,7 +595,6 @@ app.get('/.well-known/agent-card.json', async (c) => {
         ...((agentCard as any).metadata || {}),
         organization: {
           org_name: orgData.org_name,
-          org_type: orgData.org_type,
           email_domain: orgData.email_domain,
           org_address: orgData.org_address,
         },

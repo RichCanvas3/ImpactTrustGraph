@@ -236,7 +236,6 @@ async function rebuildOrganizationsUaidOnly(d1, { dryRun }) {
       agent_name TEXT NOT NULL,
       org_name TEXT,
       org_address TEXT,
-      org_type TEXT,
       email_domain TEXT NOT NULL,
       uaid TEXT,
       agent_row_id INTEGER,
@@ -252,7 +251,7 @@ async function rebuildOrganizationsUaidOnly(d1, { dryRun }) {
   await d1Query(
     d1,
     `INSERT INTO organizations (
-       id, ens_name, agent_name, org_name, org_address, org_type, email_domain,
+       id, ens_name, agent_name, org_name, org_address, email_domain,
        uaid, agent_row_id, session_package, agent_card_json, org_metadata, created_at, updated_at
      )
      SELECT ${selOrNull(bcols, "id")},
@@ -260,7 +259,6 @@ async function rebuildOrganizationsUaidOnly(d1, { dryRun }) {
             ${selOrNull(bcols, "agent_name")},
             ${selOrNull(bcols, "org_name")},
             ${selOrNull(bcols, "org_address")},
-            ${selOrNull(bcols, "org_type")},
             ${selOrNull(bcols, "email_domain")},
             ${selOrNull(bcols, "uaid")},
             ${selOrNull(bcols, "agent_row_id")},
@@ -487,7 +485,7 @@ async function main() {
   // Organizations
   const orgs = await d1Query(
     d1,
-    `SELECT id, ens_name, agent_name, org_name, org_type, email_domain, uaid, agent_row_id, session_package, agent_card_json, org_metadata
+    `SELECT id, ens_name, agent_name, org_name, email_domain, uaid, agent_row_id, session_package, agent_card_json, org_metadata
      FROM organizations
      ORDER BY id ASC` + (limit ? ` LIMIT ${limit}` : ""),
     [],

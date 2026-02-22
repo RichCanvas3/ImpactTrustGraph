@@ -151,11 +151,16 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
 export async function listInitiatives(
   individualId: number,
   scope: InitiativeScope,
+  filters?: { state?: InitiativeState; coalitionOrgId?: number | null },
   signal?: AbortSignal,
 ): Promise<InitiativeRow[]> {
   const params = new URLSearchParams();
   params.set("individualId", String(individualId));
   params.set("scope", scope);
+  if (filters?.state) params.set("state", filters.state);
+  if (typeof filters?.coalitionOrgId === "number" && filters.coalitionOrgId > 0) {
+    params.set("coalitionOrgId", String(filters.coalitionOrgId));
+  }
   const res = await fetch(`/api/initiatives?${params.toString()}`, { method: "GET", signal });
   const data = await jsonOrThrow<{ initiatives: InitiativeRow[] }>(res);
   return data.initiatives || [];
@@ -167,6 +172,7 @@ export async function createInitiative(input: {
   state?: InitiativeState;
   created_by_individual_id: number;
   created_by_org_id?: number | null;
+  coalition_org_ids?: number[];
   governance_json?: any;
   budget_json?: any;
   payout_rules_json?: any;

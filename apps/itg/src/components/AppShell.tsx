@@ -35,6 +35,7 @@ export type AppViewId =
   | "analytics"
   | "initiative-dashboard"
   | "active-initiatives"
+  | "proposed-initiatives"
   | "create-initiative"
   | "my-initiatives"
   | "initiative-matching"

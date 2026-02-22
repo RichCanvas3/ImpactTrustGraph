@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS organizations (
   agent_name TEXT NOT NULL, -- e.g., 'richcanvas-itg'
   org_name TEXT, -- Display name of the organization
   org_address TEXT, -- Physical address of the organization
-  org_type TEXT, -- Type: 'organization', 'coalition', 'contributor'
   email_domain TEXT NOT NULL, -- e.g., 'richcanvas.io'
   uaid TEXT, -- UAID for the organization's smart account (canonical agent identifier)
   agent_row_id INTEGER, -- FK to agents.id (best-effort)
@@ -67,6 +66,18 @@ CREATE TABLE IF NOT EXISTS individual_organizations (
   UNIQUE(individual_id, organization_id)
 );
 
+-- Organization roles/tags (multi-select)
+-- coalition | contributor | funding | member
+CREATE TABLE IF NOT EXISTS organization_roles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  organization_id INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  UNIQUE(organization_id, role)
+);
+
 -- Initiatives: core program container
 CREATE TABLE IF NOT EXISTS initiatives (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,6 +94,18 @@ CREATE TABLE IF NOT EXISTS initiatives (
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
   FOREIGN KEY (created_by_individual_id) REFERENCES individuals(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by_org_id) REFERENCES organizations(id) ON DELETE SET NULL
+);
+
+-- Coalition org tags for initiatives (multi-select)
+CREATE TABLE IF NOT EXISTS initiative_coalitions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  initiative_id INTEGER NOT NULL,
+  organization_id INTEGER NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (initiative_id) REFERENCES initiatives(id) ON DELETE CASCADE,
+  FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+  UNIQUE(initiative_id, organization_id)
 );
 
 -- Initiative participants (individuals and/or organizations)
@@ -216,8 +239,12 @@ CREATE INDEX IF NOT EXISTS idx_agents_ens_name ON agents(ens_name);
 CREATE INDEX IF NOT EXISTS idx_individual_organizations_individual ON individual_organizations(individual_id);
 CREATE INDEX IF NOT EXISTS idx_individual_organizations_org ON individual_organizations(organization_id);
 CREATE INDEX IF NOT EXISTS idx_individual_organizations_primary ON individual_organizations(individual_id, is_primary) WHERE is_primary = 1;
+CREATE INDEX IF NOT EXISTS idx_organization_roles_org ON organization_roles(organization_id);
+CREATE INDEX IF NOT EXISTS idx_organization_roles_role ON organization_roles(role);
 
 CREATE INDEX IF NOT EXISTS idx_initiatives_state ON initiatives(state);
+CREATE INDEX IF NOT EXISTS idx_initiative_coalitions_initiative ON initiative_coalitions(initiative_id);
+CREATE INDEX IF NOT EXISTS idx_initiative_coalitions_org ON initiative_coalitions(organization_id);
 CREATE INDEX IF NOT EXISTS idx_initiative_participants_initiative ON initiative_participants(initiative_id);
 CREATE INDEX IF NOT EXISTS idx_initiative_participants_individual ON initiative_participants(individual_id);
 CREATE INDEX IF NOT EXISTS idx_initiative_participants_org ON initiative_participants(organization_id);

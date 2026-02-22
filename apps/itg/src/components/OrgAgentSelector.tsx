@@ -112,11 +112,11 @@ export function OrgAgentSelector({ organizations, onSelect, onCancel }: OrgAgent
                 <div style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: "0.25rem" }}>
                   <strong>Agent Name:</strong> {org.agent_name}
                 </div>
-                {org.org_type && (
+                {Array.isArray((org as any).org_roles) && (org as any).org_roles.length ? (
                   <div style={{ fontSize: "0.85rem", color: "#64748b" }}>
-                    <strong>Type:</strong> {org.org_type}
+                    <strong>Roles:</strong> {(org as any).org_roles.join(", ")}
                   </div>
-                )}
+                ) : null}
                 {org.is_primary && (
                   <div
                     style={{

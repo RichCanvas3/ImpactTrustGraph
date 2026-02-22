@@ -53,6 +53,7 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
     items: [
       { id: "initiative-dashboard", label: "🎯 Initiative Dashboard" },
       { id: "active-initiatives", label: "📋 Active Initiatives" },
+      { id: "proposed-initiatives", label: "📝 Proposed Initiatives", roles: ["coordinator", "org_admin", "admin"] },
       { id: "create-initiative", label: "➕ Create Initiative", roles: ["coordinator", "org_admin", "admin"] },
       { id: "my-initiatives", label: "📌 My Initiatives", roles: ["contributor", "org_admin"] },
       { id: "initiative-matching", label: "🔗 Smart Matching", roles: ["coordinator", "admin"] },
@@ -73,7 +74,7 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
     id: "coordination",
     label: "Coordination Tools",
     items: [
-      { id: "coalition-settings", label: "⚙️ Coalition Settings", roles: ["coordinator"] },
+      { id: "coalition-settings", label: "⚙️ Coalition Settings", roles: ["coordinator"], href: "/coalition-settings" },
       { id: "member-organizations", label: "🏢 Member Organizations", roles: ["coordinator"] },
       { id: "coordinator-sync", label: "🔗 Coordinator Sync", roles: ["coordinator"] },
     ],

@@ -55,7 +55,6 @@ export interface Organization {
   agent_name: string;
   org_name: string | null;
   org_address: string | null;
-  org_type: string | null;
   email_domain: string;
   session_package: string | null; // JSON string of sessionPackage
   created_at: number;

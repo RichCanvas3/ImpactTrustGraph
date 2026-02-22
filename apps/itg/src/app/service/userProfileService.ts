@@ -39,7 +39,7 @@ export interface OrganizationAssociation {
   agent_name: string;
   org_name?: string;
   org_address?: string;
-  org_type?: string;
+  org_roles?: string[]; // coalition|contributor|funding|member
   email_domain: string;
   uaid?: string | null;
   agent_row_id?: number | null;
@@ -210,7 +210,7 @@ export async function upsertUserOrganizationByIndividualId(input: {
   agent_name: string;
   org_name?: string | null;
   org_address?: string | null;
-  org_type?: string | null;
+  org_roles?: string[] | null;
   uaid: string;
   session_package?: string | null;
   org_metadata?: string | null;

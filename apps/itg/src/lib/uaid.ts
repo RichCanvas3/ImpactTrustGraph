@@ -17,3 +17,13 @@ export function parseUaidParts(uaid: unknown): UaidParts | null {
   return { chainId, agentAccount: acct as `0x${string}` };
 }
 
+/**
+ * Canonical UAID used for all DB lookups.
+ * Converts any UAID-ish string into: `uaid:did:ethr:<chainId>:<lowercase 0x...>`
+ */
+export function canonicalizeUaid(uaid: unknown): string | null {
+  const parts = parseUaidParts(uaid);
+  if (!parts) return null;
+  return `uaid:did:ethr:${parts.chainId}:${parts.agentAccount}`;
+}
+

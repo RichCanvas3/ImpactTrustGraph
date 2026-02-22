@@ -30,6 +30,20 @@ export async function ensureInitiativesSchema(db: D1Database) {
       )
       .run();
 
+    // Initiative coalition org tags (multi-select)
+    await db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS initiative_coalitions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          initiative_id INTEGER NOT NULL,
+          organization_id INTEGER NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(initiative_id, organization_id)
+        );`,
+      )
+      .run();
+
     await db
       .prepare(
         `CREATE TABLE IF NOT EXISTS initiative_participants (
@@ -159,6 +173,8 @@ export async function ensureInitiativesSchema(db: D1Database) {
     };
 
     await idx("CREATE INDEX IF NOT EXISTS idx_initiatives_state ON initiatives(state)");
+    await idx("CREATE INDEX IF NOT EXISTS idx_initiative_coalitions_initiative ON initiative_coalitions(initiative_id)");
+    await idx("CREATE INDEX IF NOT EXISTS idx_initiative_coalitions_org ON initiative_coalitions(organization_id)");
     await idx("CREATE INDEX IF NOT EXISTS idx_initiative_participants_initiative ON initiative_participants(initiative_id)");
     await idx("CREATE INDEX IF NOT EXISTS idx_initiative_participants_individual ON initiative_participants(individual_id)");
     await idx("CREATE INDEX IF NOT EXISTS idx_initiative_participants_org ON initiative_participants(organization_id)");
