@@ -1042,6 +1042,15 @@ export default function OnboardingPage() {
         throw new Error("Participant agent creation did not return an agentId");
       }
 
+      // Best-effort: trigger knowledge base sync after agent registration.
+      try {
+        const chainId = Number(sepolia.id);
+        const kbChainId = chainId === 1 || chainId === 59144 ? String(chainId) : 'all';
+        void fetch(`/api/sync/agent-pipeline?chainId=${encodeURIComponent(kbChainId)}`, { method: 'POST' });
+      } catch {
+        // ignore
+      }
+
       setParticipantCreateStatus("Finalizing registration…");
       setParticipantEnsName(ensName);
 
@@ -1391,6 +1400,15 @@ export default function OnboardingPage() {
           // If result doesn't have expected success indicators, treat as failure
           console.warn("[onboarding] Agent creation result missing success indicators:", result);
           throw new Error("Agent creation did not return expected success indicators");
+        }
+
+        // Best-effort: trigger knowledge base sync after agent registration.
+        try {
+          const chainId = Number(sepolia.id);
+          const kbChainId = chainId === 1 || chainId === 59144 ? String(chainId) : 'all';
+          void fetch(`/api/sync/agent-pipeline?chainId=${encodeURIComponent(kbChainId)}`, { method: 'POST' });
+        } catch {
+          // ignore
         }
       } catch (createError: any) {
         console.error("Failed to create agent:", createError);
