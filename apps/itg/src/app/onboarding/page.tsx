@@ -960,6 +960,35 @@ export default function OnboardingPage() {
         return;
       }
 
+      // Preflight: prove we can sign with this provider (production failures often
+      // come from a “connected” session that is read-only / cannot sign).
+      setParticipantCreateStatus("Verifying wallet signing…");
+      try {
+        const chainIdHex = await provider.request({ method: "eth_chainId" });
+        const parsedChainId =
+          typeof chainIdHex === "string" && chainIdHex.startsWith("0x")
+            ? parseInt(chainIdHex, 16)
+            : Number(chainIdHex);
+        if (Number.isFinite(parsedChainId) && parsedChainId !== sepolia.id) {
+          setError(`Wrong network. Please switch to Sepolia (chainId ${sepolia.id}) and try again.`);
+          return;
+        }
+
+        const msg = `ITG onboarding signature check: ${Date.now()}`;
+        await provider.request({
+          method: "personal_sign",
+          params: [stringToHex(msg), account],
+        });
+      } catch (e: any) {
+        const m = e?.message ? String(e.message) : String(e);
+        setError(
+          "Your wallet session appears unable to sign transactions/messages. " +
+            "Please disconnect + reconnect using Web3Auth social login (Google/etc) or a wallet that supports signing, then try again." +
+            (process.env.NODE_ENV === "development" ? ` (${m})` : "")
+        );
+        return;
+      }
+
       setParticipantCreateStatus("Computing smart account address…");
       const agentAccountAddress = await getCounterfactualSmartAccountAddressByAgentName(
         agentName,
@@ -1243,6 +1272,35 @@ export default function OnboardingPage() {
       if (!account || typeof account !== "string") {
         setError(
           "We could not determine your wallet address. Please disconnect and reconnect, then try again."
+        );
+        return;
+      }
+
+      // Preflight: prove we can sign with this provider (production failures often
+      // come from a “connected” session that is read-only / cannot sign).
+      setOrgCreateStatus("Verifying wallet signing…");
+      try {
+        const chainIdHex = await provider.request({ method: "eth_chainId" });
+        const parsedChainId =
+          typeof chainIdHex === "string" && chainIdHex.startsWith("0x")
+            ? parseInt(chainIdHex, 16)
+            : Number(chainIdHex);
+        if (Number.isFinite(parsedChainId) && parsedChainId !== sepolia.id) {
+          setError(`Wrong network. Please switch to Sepolia (chainId ${sepolia.id}) and try again.`);
+          return;
+        }
+
+        const msg = `ITG org onboarding signature check: ${Date.now()}`;
+        await provider.request({
+          method: "personal_sign",
+          params: [stringToHex(msg), account],
+        });
+      } catch (e: any) {
+        const m = e?.message ? String(e.message) : String(e);
+        setError(
+          "Your wallet session appears unable to sign transactions/messages. " +
+            "Please disconnect + reconnect using Web3Auth social login (Google/etc) or a wallet that supports signing, then try again." +
+            (process.env.NODE_ENV === "development" ? ` (${m})` : "")
         );
         return;
       }

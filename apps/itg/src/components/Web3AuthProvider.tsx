@@ -72,9 +72,18 @@ export function Web3AuthProvider({
           config: { chainConfig }
         });
 
+        const requestedNetwork =
+          (process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || "").trim().toLowerCase();
+        const web3AuthNetwork =
+          requestedNetwork === "mainnet" || requestedNetwork === "sapphire_mainnet"
+            ? "sapphire_mainnet"
+            : requestedNetwork === "testnet" || requestedNetwork === "sapphire_devnet"
+              ? "sapphire_devnet"
+              : "sapphire_devnet";
+
         const web3authInstance = new Web3Auth({
           clientId,
-          web3AuthNetwork: "sapphire_devnet",
+          web3AuthNetwork,
           privateKeyProvider
         });
 
